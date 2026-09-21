@@ -1,0 +1,57 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Google & OAuth credentials
+credentials.json
+token.json
+client_secret*.json
+
+# Keys and certificates
+*.pem
+*.key
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter Notebooks and checkpoints
+*.ipynb
+.ipynb_checkpoints/
+
+# IDE configurations
+.vscode/
+.idea/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Data and spreadsheets
+data/
+*.csv
+*.xlsx
+
+# Generated output files
+cover_letter_*.pdf
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Streamlit secrets
+.streamlit/secrets.toml

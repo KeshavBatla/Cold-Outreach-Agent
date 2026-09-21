@@ -1,0 +1,28 @@
+# Core LangChain & LangGraph
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-google-genai>=1.0.0
+langgraph>=0.1.0
+
+# Structured Output Extraction
+trustcall>=0.0.18
+pydantic>=2.0.0
+
+# Search & HTTP
+requests>=2.28.0
+
+# PDF Generation
+fpdf2>=2.8.0
+
+# Google Gmail API & Auth
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# Configuration & Environment
+python-dotenv>=1.0.0
+
+# Web Application UI
+streamlit>=1.30.0
+
