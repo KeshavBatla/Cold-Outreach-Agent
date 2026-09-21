@@ -315,6 +315,6 @@ Features available in the Streamlit app:
 
 - **Author**: Keshav Batla
 - **Email**: batlakeshav@gmail.com
-- **LinkedIn**: [linkedin.com/in/keshav-batla](https://linkedin.com/in/keshav-batla)
+- **LinkedIn**: [linkedin.com/in/keshav-batla](https://www.linkedin.com/in/keshav-batla-715a38330/)
 - **GitHub**: [github.com/keshavbatla](https://github.com/keshavbatla)
 
