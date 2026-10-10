@@ -4,14 +4,13 @@ Generates tailored, punchy cover letters based on candidate CV and company resea
 with an automated LLM evaluation and refinement feedback loop.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
-import config
+import config as app_config
 from graph.state import CoverwriterState, OutreachState
-from prompts.candidate import CANDIDATE_CV, EXAMPLE_COVER_LETTER
 from prompts.cover_writer import (
     COVER_LETTER_SYSTEM_TEMPLATE,
     COVER_LETTER_HUMAN_PROMPT,
@@ -36,10 +35,25 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
     description = state.get("job_description") or "Not specified"
     research = state.get("research_summary") or ""
     feedback = state.get("evaluator_feedback")
+    candidate_cv = state.get("raw_cv_text", "")
+    if not candidate_cv or not candidate_cv.strip():
+        raise ValueError("raw_cv_text is empty. Cannot write a cover letter without a CV.")
+
+    example_cover_letter = state.get("example_cover_letter", "")
+
+    # Build the example section if example cover letter is provided
+    if example_cover_letter and example_cover_letter.strip():
+        example_section = (
+            "Here is an example of a strong cover letter this candidate has written before. "
+            "Match its tone and structure only, never copy facts, names or projects from it:\n"
+            f"{example_cover_letter.strip()}\n\n"
+        )
+    else:
+        example_section = ""
 
     system_text = COVER_LETTER_SYSTEM_TEMPLATE.format(
-        candidate_cv=CANDIDATE_CV,
-        example_cover_letter=EXAMPLE_COVER_LETTER,
+        candidate_cv=candidate_cv,
+        example_section=example_section,
         company=company,
         role=role,
         description=description,
@@ -49,7 +63,7 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
     if feedback:
         system_text += f"\nPrevious draft's feedback (fix this): {feedback}\n"
 
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     response = llm.invoke(
         [
             SystemMessage(content=system_text),
@@ -71,7 +85,7 @@ def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
             "retry_count": current_retry + 1,
         }
 
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     evaluator = get_coverletter_evaluator(llm)
 
     messages = [
@@ -97,7 +111,7 @@ def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
 
 def llm_router_cover(state: CoverwriterState) -> str:
     retry_count = state.get("retry_count", 0)
-    max_retries = state.get("max_retries") or config.MAX_RETRIES
+    max_retries = state.get("max_retries") or app_config.MAX_RETRIES
     print(f"[llm_router_cover] retry_count={retry_count}, max_retries={max_retries}, letter_sufficient={state.get('letter_sufficient')}")
 
     if state.get("letter_sufficient") is True:
@@ -125,11 +139,18 @@ def build_coverwriter_graph(checkpointer=None):
 coverwriter_graph = build_coverwriter_graph()
 
 
-def run_coverwriter(state: OutreachState, cfg: Dict[str, Any]) -> Dict[str, Any]:
+from langchain_core.runnables import RunnableConfig
+
+
+def run_coverwriter(state: OutreachState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Execute the Coverwriter subgraph.
     """
-    parent_thread_id = cfg["configurable"]["thread_id"]
+    cfg = config or {}
+    parent_thread_id = (
+        (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None)
+        or (Path(state.get("run_dir")).name if state.get("run_dir") else "run")
+    )
     clean_config = {"configurable": {"thread_id": f"{parent_thread_id}_cover"}}
 
     sub_input = {
@@ -138,8 +159,10 @@ def run_coverwriter(state: OutreachState, cfg: Dict[str, Any]) -> Dict[str, Any]
         "job_role": state.get("job_role"),
         "job_description": state.get("job_description"),
         "research_summary": state.get("research_summary"),
+        "raw_cv_text": state.get("raw_cv_text"),
+        "example_cover_letter": state.get("example_cover_letter"),
         "retry_count": 0,
-        "max_retries": state.get("max_retries", config.MAX_RETRIES),
+        "max_retries": state.get("max_retries", app_config.MAX_RETRIES),
     }
     result = coverwriter_graph.invoke(sub_input, clean_config)
     print("\n--- COVER LETTER DRAFT ---")

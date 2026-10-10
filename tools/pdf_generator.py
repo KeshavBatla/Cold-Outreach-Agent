@@ -28,6 +28,14 @@ def text_to_pdf(text: str, output_path: str, title: Optional[str] = None) -> str
         pdf.add_font("DejaVu", "", str(font_reg))
         pdf.add_font("DejaVu", "B", str(font_bold))
         font_name = "DejaVu"
+    else:
+        import logging
+        logging.warning(
+            "DejaVu fonts not found at %s and %s. Falling back to Helvetica; "
+            "em dashes and non-Latin characters may fail.",
+            font_reg,
+            font_bold,
+        )
 
     pdf.set_text_color(17, 17, 17)
 

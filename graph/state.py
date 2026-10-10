@@ -21,9 +21,18 @@ class OutreachState(MessagesState):
     email_body: Optional[str]
     subject: Optional[str]
 
+    candidate_name: Optional[str]
     candidate_profile: Optional[str]
     mode: Optional[str]
     resume_path: Optional[str]
+    run_dir: Optional[str]
+
+    # Generalized candidate inputs
+    raw_cv_text: Optional[str]          # Extracted text from uploaded CV
+    example_cover_letter: Optional[str] # Uploaded example cover letter text
+    target_seniority: Optional[str]     # e.g., "fresher/intern", "experienced"
+    target_domain_keywords: Optional[str] # e.g., "agentic AI, LLM applications"
+    location_preference: Optional[str]  # e.g., "remote", "India-based"
 
     research_approved: bool
     cover_letter_approved: bool
@@ -54,6 +63,9 @@ class ResearcherState(MessagesState):
     job_role: Optional[str]
     job_description: Optional[str]
     research_summary: Optional[str]
+    target_seniority: Optional[str]
+    target_domain_keywords: Optional[str]
+    location_preference: Optional[str]
     research_sufficient: bool
     contact_failed_only: bool
     hunter_only_attempts: int
@@ -73,6 +85,8 @@ class CoverwriterState(MessagesState):
     job_role: Optional[str]
     job_description: Optional[str]
     research_summary: Optional[str]
+    raw_cv_text: Optional[str]
+    example_cover_letter: Optional[str]
     cover_letter: Optional[str]
     evaluator_feedback: Optional[str]
     letter_sufficient: Optional[bool]
@@ -90,6 +104,8 @@ class EmailwriterState(MessagesState):
     job_role: Optional[str]
     research_summary: Optional[str]
     cover_letter: Optional[str]
+    candidate_name: Optional[str]
+    candidate_profile: Optional[str]
     email_body: Optional[str]
     evaluator_feedback: Optional[str]
     email_sufficient: Optional[bool]
@@ -109,8 +125,9 @@ class EmaildrafterState(MessagesState):
     email_body: Optional[str]
     cover_letter: Optional[str]
     subject: Optional[str]
+    candidate_name: Optional[str]
     resume_path: Optional[str]
+    run_dir: Optional[str]
     human_decision: Optional[str]
     sent: bool
     excel_log_entry: Optional[Dict[str, Any]]
-

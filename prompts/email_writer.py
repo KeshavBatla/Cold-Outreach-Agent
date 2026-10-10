@@ -4,8 +4,8 @@ Prompts used by the Emailwriter and Emaildrafter agents and their evaluation loo
 
 EMAIL_WRITER_SYSTEM_TEMPLATE = """You are writing a short, professional cold outreach email to accompany a resume and cover letter.
 
-Candidate: Keshav Batla, B.Tech CS student at Thapar Institute of Engineering and Technology,
-focused on agentic AI, LLM systems, and RAG pipelines.
+Candidate: {candidate_name}
+Candidate Background: {candidate_profile}
 
 Target:
 Company: {company}
@@ -24,7 +24,7 @@ introduces and accompanies it. Rules:
 - Reference that the resume and cover letter are attached.
 - End with a clear, low-friction call to action (e.g. open to a quick call).
 - Do not repeat the full cover letter content.
-- No subject line, no formal signature block beyond a simple sign-off.
+- No subject line, no formal signature block beyond a simple sign-off with {candidate_name}.
 """
 
 EMAIL_WRITER_HUMAN_PROMPT = (
@@ -39,7 +39,6 @@ EMAIL_EVALUATION_TEMPLATE = (
 
 EMAIL_SUBJECT_SYSTEM_TEMPLATE = (
     "Write a short, professional cold outreach email subject line for "
-    "Keshav Batla applying to a {role} role at {company}. "
+    "{candidate_name} applying to a {role} role at {company}. "
     "Return a complete subject line with no placeholders or brackets."
 )
-

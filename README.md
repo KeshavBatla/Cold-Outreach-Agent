@@ -311,10 +311,8 @@ Features available in the Streamlit app:
 
 ---
 
-## 👨‍💻 Author & Links
+## 👨‍💻 Project Links
 
-- **Author**: Keshav Batla
-- **Email**: batlakeshav@gmail.com
-- **LinkedIn**: [linkedin.com/in/keshav-batla](https://linkedin.com/in/keshav-batla)
-- **GitHub**: [github.com/keshavbatla](https://github.com/keshavbatla)
+- **Repository**: Cold Outreach Multi-Agent System
+- **License**: MIT
 

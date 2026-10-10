@@ -7,10 +7,7 @@ COVER_LETTER_SYSTEM_TEMPLATE = """You are an expert cover letter writer for cold
 Candidate CV:
 {candidate_cv}
 
-Here is an example of a strong cover letter this candidate has written before. Match its
-tone, structure, and confident-but-honest style — NOT its specific content, which was for
-a different company:
-{example_cover_letter}
+{example_section}
 
 Write a new cover letter for this target:
 Company: {company}

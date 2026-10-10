@@ -11,30 +11,45 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
+try:
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+except ImportError:
+    Credentials = None
+    InstalledAppFlow = None
+    Request = None
+    build = None
 
 import config
 
 
-def get_gmail_service():
+def get_gmail_service(token_path: Optional[str] = None):
     """
     Authenticate and build the Google Gmail API service using OAuth2 credentials.
     Reads token.json or initiates local server flow via credentials.json.
+    Accepts an optional token_path, defaulting to config.TOKEN_FILE.
     """
+    if Credentials is None or build is None:
+        raise ImportError(
+            "Google Gmail API dependencies are not installed. "
+            "Please install google-api-python-client and google-auth-oauthlib."
+        )
+
     creds = None
-    token_path = Path(config.TOKEN_FILE)
+    resolved_token_path = Path(token_path) if token_path else Path(config.TOKEN_FILE)
     creds_path = Path(config.CREDENTIALS_FILE)
 
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), config.GMAIL_SCOPES)
+    if resolved_token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(resolved_token_path), config.GMAIL_SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         elif creds_path.exists():
+            if InstalledAppFlow is None:
+                raise ImportError("google_auth_oauthlib is required for OAuth login flow.")
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(creds_path), config.GMAIL_SCOPES
             )
@@ -45,7 +60,7 @@ def get_gmail_service():
                 "Download your OAuth client ID credentials.json from Google Cloud Console."
             )
 
-        with open(token_path, "w", encoding="utf-8") as token_file:
+        with open(resolved_token_path, "w", encoding="utf-8") as token_file:
             token_file.write(creds.to_json())
 
     return build("gmail", "v1", credentials=creds)

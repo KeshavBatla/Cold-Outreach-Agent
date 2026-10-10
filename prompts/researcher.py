@@ -6,11 +6,12 @@ RESEARCHER_QUERY_SYSTEM_PROMPT = """You are an expert search query generator for
 Candidate profile: {profile}
 Mode: {mode}
 Seed: {seed_query}
+Seniority: {seniority}
+Domain focus: {domain_focus}
+Location preference: {location_preference}
 
 If the mode is "open_role": Frame a query to extract all necessary details of the seed company hiring for tech jobs relevant to the user's profile. Target company name, hiring manager/contact email, contact name, job role, and job description.
 If the mode is "speculative": Frame a query to find general tech companies that usually hire interns based on the candidate profile. Target company name, HR/Talent Acquisition emails, and contact names/titles.
-Seniority: target fresher-level or internship opportunities ONLY. Exclude anything asking for 3+ years of experience, or senior/staff/lead titles.
-Domain focus: agentic AI, LLM applications, and multi-agent systems specifically — not generic backend engineering, and not roles that are primarily "RAG engineer" without a clear agentic/LLM-systems scope.
 You must identify exactly ONE specific, real, named company — never a market survey or a list of multiple companies/postings.
 Return ONLY the raw search query string. Do not include quotes, explanations, or conversational text."""
 

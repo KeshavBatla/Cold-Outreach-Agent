@@ -2,10 +2,18 @@
 Hunter.io integration for company domain search, contact discovery, scoring, and verification.
 """
 
+import os
+import re
+import warnings
 from typing import List, Dict, Any, Optional
 import requests
 import config
 from utils.helpers import EMAIL_REGEX
+
+
+def _matches_phrase(phrases: List[str], text: str) -> bool:
+    """Helper to check if any phrase matches in text using whole-phrase word boundaries."""
+    return any(bool(re.search(rf"\b{re.escape(p)}\b", text)) for p in phrases)
 
 
 def score_contact(e: Dict[str, Any]) -> int:
@@ -55,11 +63,11 @@ def score_contact(e: Dict[str, Any]) -> int:
         "artificial intelligence",
     ]
 
-    if any(x in position for x in high_priority):
+    if _matches_phrase(high_priority, position):
         score += 100
-    elif any(x in position for x in recruiter_titles):
+    elif _matches_phrase(recruiter_titles, position):
         score += 80
-    elif any(x in position for x in medium_priority):
+    elif _matches_phrase(medium_priority, position):
         score += 50
 
     # Seniority boost
@@ -129,8 +137,14 @@ def verify_email(email: str, api_key: Optional[str] = None) -> bool:
 
     key = api_key or config.HUNTER_API_KEY
     if not key:
-        print("[verify_email] HUNTER_API_KEY not configured, falling back to regex validation.")
-        return True
+        allow_unverified = os.getenv("ALLOW_UNVERIFIED_EMAILS", "").strip().lower() in ("true", "1", "yes")
+        if allow_unverified:
+            return True
+        warnings.warn(
+            "[verify_email] HUNTER_API_KEY is not set. Failing email verification. "
+            "Set ALLOW_UNVERIFIED_EMAILS=true in your environment to bypass."
+        )
+        return False
 
     try:
         resp = requests.get(

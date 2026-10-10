@@ -5,12 +5,24 @@
 
 # Google & OAuth credentials
 credentials.json
-token.json
+credentials*.json
+token*.json
 client_secret*.json
 
-# Keys and certificates
-*.pem
-*.key
+# Isolated run directories
+runs/
+
+# Resumes and uploaded documents
+resume.pdf
+*resume*.pdf
+*resume*.docx
+*cv*.pdf
+*cv*.docx
+*CV*.pdf
+*CV*.docx
+
+# Generated output files & PDFs
+cover_letter_*.pdf
 
 # Python bytecode and caches
 __pycache__/
@@ -36,7 +48,7 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs & temp
 *.log
 logs/
 
@@ -44,9 +56,6 @@ logs/
 data/
 *.csv
 *.xlsx
-
-# Generated output files
-cover_letter_*.pdf
 
 # Testing and coverage
 .pytest_cache/

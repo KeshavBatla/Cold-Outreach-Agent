@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import streamlit as st
 import config
-from prompts.candidate import CANDIDATE_PROFILE
+from utils.cv_parser import build_run_inputs
 from graph.workflow import create_initial_outreach_state
 from agents.researcher import run_researcher
 from agents.cover_writer import run_coverwriter
@@ -36,6 +36,12 @@ if "thread_id" not in st.session_state:
     st.session_state.thread_id = f"st_run_{uuid.uuid4().hex[:8]}"
 if "stage" not in st.session_state:
     st.session_state.stage = "idle"  # idle -> researched -> cover_drafted -> email_drafted -> ready_to_send -> completed
+if "run_inputs" not in st.session_state:
+    st.session_state.run_inputs = None
+if "candidate_profile" not in st.session_state:
+    st.session_state.candidate_profile = ""
+if "uploaded_cv_name" not in st.session_state:
+    st.session_state.uploaded_cv_name = None
 
 # Sidebar configuration
 with st.sidebar:
@@ -71,17 +77,56 @@ with st.sidebar:
             placeholder="e.g. Simular, Perplexity AI, Cohere",
         )
 
-    st.markdown("---")
-    st.subheader("Candidate Resume")
-    resume_path_input = st.text_input(
-        "CV File Path",
-        value=config.DEFAULT_RESUME_PATH,
+    target_seniority = st.text_input(
+        "Target Seniority",
+        placeholder="e.g. Intern, Junior, Fresher",
     )
+    target_domain_keywords = st.text_input(
+        "Target Domain Keywords",
+        placeholder="e.g. Agentic AI, LLM systems, Machine Learning",
+    )
+    location_preference = st.text_input(
+        "Location Preference",
+        placeholder="e.g. Remote, India, US",
+    )
+
+    st.markdown("---")
+    st.subheader("Candidate Resume & Documents")
+    cv_file = st.file_uploader("Upload CV (PDF or DOCX)", type=["pdf", "docx"])
+    example_letter_file = st.file_uploader("Upload Example Letter (Optional)", type=["pdf", "docx", "txt"])
+
+    if cv_file is not None and st.session_state.uploaded_cv_name != cv_file.name:
+        run_dir = config.get_run_dir(st.session_state.thread_id)
+        cv_dest = run_dir / cv_file.name
+        with open(cv_dest, "wb") as f:
+            f.write(cv_file.getbuffer())
+
+        example_dest = None
+        if example_letter_file is not None:
+            example_dest = run_dir / example_letter_file.name
+            with open(example_dest, "wb") as f:
+                f.write(example_letter_file.getbuffer())
+
+        try:
+            parsed_inputs = build_run_inputs(
+                cv_path=cv_dest,
+                example_letter_path=example_dest,
+                run_dir=run_dir,
+            )
+            st.session_state.run_inputs = parsed_inputs
+            st.session_state.candidate_profile = parsed_inputs.candidate_profile
+            st.session_state.uploaded_cv_name = cv_file.name
+            st.success(f"Loaded profile for: {parsed_inputs.candidate_name}")
+        except Exception as e:
+            st.error(f"Error parsing CV: {e}")
 
     if st.button("Reset Workflow", use_container_width=True):
         st.session_state.outreach_state = None
         st.session_state.thread_id = f"st_run_{uuid.uuid4().hex[:8]}"
         st.session_state.stage = "idle"
+        st.session_state.run_inputs = None
+        st.session_state.candidate_profile = ""
+        st.session_state.uploaded_cv_name = None
         st.rerun()
 
 # Workflow Pipeline View
@@ -91,9 +136,10 @@ with tab_profile:
     st.subheader("Candidate Profile & Skills")
     profile_text = st.text_area(
         "Active Candidate Profile (used by Researcher and Writers)",
-        value=CANDIDATE_PROFILE,
+        value=st.session_state.candidate_profile,
         height=200,
     )
+    st.session_state.candidate_profile = profile_text
 
 with tab_logs:
     st.subheader("Execution State Log")
@@ -105,24 +151,36 @@ with tab_logs:
 with tab_pipeline:
     # 0. Start Stage
     if st.session_state.stage == "idle":
-        st.info("Select targeting parameters in the sidebar and trigger the agent workflow below.")
+        st.info("Upload your CV in the sidebar and trigger the agent workflow below.")
         if st.button("🚀 Start Outreach Cycle", type="primary", use_container_width=True):
-            resolved_mode = "open_role" if (is_open_role and company_input.strip()) else "speculative"
-            seed = company_input.strip() if is_open_role else None
-            st.session_state.outreach_state = create_initial_outreach_state(
-                company_name=seed,
-                mode=resolved_mode,
-                candidate_profile=profile_text,
-                resume_path=resume_path_input,
-            )
-            st.session_state.stage = "running_researcher"
-            st.rerun()
+            if not st.session_state.run_inputs:
+                st.error("Please upload a CV (PDF or DOCX) in the sidebar before starting.")
+            else:
+                inputs = st.session_state.run_inputs
+                resolved_mode = "open_role" if (is_open_role and company_input.strip()) else "speculative"
+                seed = company_input.strip() if is_open_role else None
+                run_dir = config.get_run_dir(st.session_state.thread_id)
+
+                st.session_state.outreach_state = create_initial_outreach_state(
+                    company_name=seed,
+                    mode=resolved_mode,
+                    candidate_profile=st.session_state.candidate_profile or inputs.candidate_profile,
+                    resume_path=inputs.resume_path,
+                    raw_cv_text=inputs.raw_cv_text,
+                    example_cover_letter=inputs.example_cover_letter,
+                    target_seniority=target_seniority or None,
+                    target_domain_keywords=target_domain_keywords or None,
+                    location_preference=location_preference or None,
+                    candidate_name=inputs.candidate_name,
+                    run_dir=str(run_dir),
+                )
+                st.session_state.stage = "running_researcher"
+                st.rerun()
 
     # 1. Running Researcher Agent
     if st.session_state.stage == "running_researcher":
         with st.spinner("🔍 Researcher Agent is scanning the web, extracting job roles, and discovering verified contacts..."):
             cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
-            # We bypass the console input by passing an auto-approve callback or letting the user approve in UI
             def ui_approve(_):
                 return "approve"
 
@@ -199,7 +257,6 @@ with tab_pipeline:
     if st.session_state.stage == "running_drafter":
         with st.spinner("📑 Emaildrafter Agent is generating subject line and packaging attachments..."):
             cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
-            # Let drafter generate subject without auto-sending
             def wait_for_ui_send(_):
                 return "reject"  # Pause before sending
 
@@ -221,9 +278,12 @@ with tab_pipeline:
         email_body = st.text_area("Email Body", value=state.get("email_body", ""), height=150)
         st.session_state.outreach_state["email_body"] = email_body
 
-        st.markdown(f"**Attachments:**")
+        st.markdown("**Attachments:**")
         st.write(f"1. Resume: `{state.get('resume_path')}`")
-        st.write(f"2. Formatted PDF Cover Letter: `cover_letter_{state.get('company_name', '').replace(' ', '_')}.pdf`")
+        clean_company = (state.get("company_name") or "Company").replace(" ", "_").replace("/", "_")
+        run_dir = state.get("run_dir")
+        pdf_path = (Path(run_dir) / f"cover_letter_{clean_company}.pdf") if run_dir else f"cover_letter_{clean_company}.pdf"
+        st.write(f"2. Formatted PDF Cover Letter: `{pdf_path}`")
 
         c1, c2 = st.columns([1, 1])
         with c1:
@@ -257,5 +317,7 @@ with tab_pipeline:
             st.session_state.outreach_state = None
             st.session_state.thread_id = f"st_run_{uuid.uuid4().hex[:8]}"
             st.session_state.stage = "idle"
+            st.session_state.run_inputs = None
+            st.session_state.candidate_profile = ""
+            st.session_state.uploaded_cv_name = None
             st.rerun()
-

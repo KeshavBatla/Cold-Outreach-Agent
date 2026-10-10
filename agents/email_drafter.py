@@ -10,7 +10,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
-import config
+import config as app_config
 from graph.state import EmaildrafterState, OutreachState
 from prompts.email_writer import EMAIL_SUBJECT_SYSTEM_TEMPLATE
 from evaluation.llm_evaluator import EmailSubject, get_subject_generator
@@ -24,14 +24,17 @@ def emaildrafter(state: EmaildrafterState) -> Dict[str, Any]:
     if not company or not role:
         return {"subject": None}
 
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     subject_generator = get_subject_generator(llm)
 
+    candidate_name = state.get("candidate_name") or "Applicant"
     result = subject_generator.invoke(
         {
             "messages": [
                 SystemMessage(
-                    content=EMAIL_SUBJECT_SYSTEM_TEMPLATE.format(role=role, company=company)
+                    content=EMAIL_SUBJECT_SYSTEM_TEMPLATE.format(
+                        role=role, company=company, candidate_name=candidate_name
+                    )
                 ),
                 HumanMessage(content="Generate it."),
             ]
@@ -69,17 +72,21 @@ def emailsender(state: EmaildrafterState) -> Dict[str, Any]:
     attachments = []
 
     # 1. Attach Resume / CV
-    resume_path = state.get("resume_path") or config.DEFAULT_RESUME_PATH
+    resume_path = state.get("resume_path")
     if resume_path and Path(resume_path).exists():
         attachments.append(resume_path)
     else:
         print(f"[emailsender] WARNING: Resume not found at {resume_path} — proceeding without it.")
 
-    # 2. Render and attach Cover Letter PDF
+    # 2. Render and attach Cover Letter PDF into run_dir
     cover_letter_text = state.get("cover_letter")
     if cover_letter_text:
         clean_company = company_name.replace(" ", "_").replace("/", "_")
-        pdf_path = Path(config.COVER_LETTER_DIR) / f"cover_letter_{clean_company}.pdf"
+        run_dir = state.get("run_dir")
+        if run_dir:
+            pdf_path = Path(run_dir) / f"cover_letter_{clean_company}.pdf"
+        else:
+            pdf_path = Path(app_config.COVER_LETTER_DIR) / f"cover_letter_{clean_company}.pdf"
         try:
             text_to_pdf(cover_letter_text, str(pdf_path), title=f"Cover Letter — {company_name}")
             attachments.append(str(pdf_path))
@@ -94,7 +101,7 @@ def emailsender(state: EmaildrafterState) -> Dict[str, Any]:
         subject=subject,
         body=body,
         attachment_paths=attachments,
-        dry_run=config.DRY_RUN,
+        dry_run=app_config.DRY_RUN,
     )
 
     if send_result.get("sent"):
@@ -158,15 +165,22 @@ def build_emaildrafter_graph(checkpointer=None):
 emaildrafter_graph = build_emaildrafter_graph()
 
 
+from langchain_core.runnables import RunnableConfig
+
+
 def run_emaildrafter(
     state: OutreachState,
-    cfg: Dict[str, Any],
+    config: Optional[RunnableConfig] = None,
     decision_callback: Optional[Callable[[Dict[str, Any]], str]] = None,
 ) -> Dict[str, Any]:
     """
     Execute the Emaildrafter subgraph and handle human approval.
     """
-    parent_thread_id = cfg["configurable"]["thread_id"]
+    cfg = config or {}
+    parent_thread_id = (
+        (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None)
+        or (Path(state.get("run_dir")).name if state.get("run_dir") else "run")
+    )
     clean_config = {"configurable": {"thread_id": f"{parent_thread_id}_draft"}}
 
     sub_input = {
@@ -177,7 +191,9 @@ def run_emaildrafter(
         "contact_name": state.get("contact_name"),
         "email_body": state.get("email_body"),
         "cover_letter": state.get("cover_letter"),
-        "resume_path": state.get("resume_path") or config.DEFAULT_RESUME_PATH,
+        "candidate_name": state.get("candidate_name"),
+        "resume_path": state.get("resume_path"),
+        "run_dir": state.get("run_dir"),
     }
     result = emaildrafter_graph.invoke(sub_input, clean_config)
 

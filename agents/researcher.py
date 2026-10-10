@@ -9,9 +9,8 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
-import config
+import config as app_config
 from graph.state import ResearcherState, OutreachState
-from prompts.candidate import CANDIDATE_PROFILE
 from prompts.researcher import (
     RESEARCHER_QUERY_SYSTEM_PROMPT,
     RESEARCHER_QUERY_HUMAN_PROMPT,
@@ -32,13 +31,21 @@ from utils.helpers import extract_text, is_already_mailed, PLACEHOLDER_VALUES, E
 
 
 def inputpromptformater(state: ResearcherState) -> Dict[str, Any]:
-    llm = config.get_llm()
-    profile = state.get("candidate_profile", CANDIDATE_PROFILE)
+    llm = app_config.get_llm()
+    profile = state.get("candidate_profile", "")
     seed_query = state.get("seed_query", "")
     mode = "open_role" if seed_query else "speculative"
+    seniority = state.get("target_seniority") or ""
+    domain_focus = state.get("target_domain_keywords") or ""
+    location_preference = state.get("location_preference") or ""
 
     system_text = RESEARCHER_QUERY_SYSTEM_PROMPT.format(
-        profile=profile, mode=mode, seed_query=seed_query
+        profile=profile,
+        mode=mode,
+        seed_query=seed_query,
+        seniority=seniority,
+        domain_focus=domain_focus,
+        location_preference=location_preference,
     )
     response = llm.invoke(
         [
@@ -56,7 +63,7 @@ def tavilysearch(state: ResearcherState) -> Dict[str, Any]:
 
 
 def formatingnode(state: ResearcherState) -> Dict[str, Any]:
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     merged = state.get("tavily_findings") or "No findings available."
     research_extractor = get_research_extractor(llm)
 
@@ -177,7 +184,7 @@ def llm_evaluates(state: ResearcherState) -> Dict[str, Any]:
             "retry_count": state.get("retry_count", 0) + 1,
         }
 
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     research_evaluator = get_research_evaluator(llm)
 
     messages = [
@@ -216,7 +223,7 @@ def human_evaluation(state: ResearcherState) -> Dict[str, Any]:
 def llm_router(state: ResearcherState) -> str:
     if state.get("research_sufficient"):
         return "human_evaluation"
-    if state.get("retry_count", 0) >= state.get("max_retries", config.MAX_RETRIES):
+    if state.get("retry_count", 0) >= state.get("max_retries", app_config.MAX_RETRIES):
         return "human_evaluation"
     return "trynextcandidate" if state.get("contact_failed_only") else "inputpromptformater"
 
@@ -267,24 +274,34 @@ def build_researcher_graph(checkpointer=None):
 researcher_graph = build_researcher_graph()
 
 
+from langchain_core.runnables import RunnableConfig
+
+
 def run_researcher(
     state: OutreachState,
-    cfg: Dict[str, Any],
+    config: Optional[RunnableConfig] = None,
     decision_callback: Optional[Callable[[Dict[str, Any]], str]] = None,
 ) -> Dict[str, Any]:
     """
     Execute the Researcher subgraph and handle human-in-the-loop interrupts.
     """
-    parent_thread_id = cfg["configurable"]["thread_id"]
+    cfg = config or {}
+    parent_thread_id = (
+        (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None)
+        or (Path(state.get("run_dir")).name if state.get("run_dir") else "run")
+    )
     clean_config = {"configurable": {"thread_id": f"{parent_thread_id}_researcher"}}
 
     sub_input = {
         "messages": state.get("messages", []),
         "seed_query": state.get("company_name"),
-        "candidate_profile": state.get("candidate_profile", CANDIDATE_PROFILE),
+        "candidate_profile": state.get("candidate_profile", ""),
         "mode": state.get("mode", "open_role" if state.get("company_name") else "speculative"),
+        "target_seniority": state.get("target_seniority"),
+        "target_domain_keywords": state.get("target_domain_keywords"),
+        "location_preference": state.get("location_preference"),
         "retry_count": 0,
-        "max_retries": state.get("max_retries", config.MAX_RETRIES),
+        "max_retries": state.get("max_retries", app_config.MAX_RETRIES),
     }
 
     result = researcher_graph.invoke(sub_input, clean_config)

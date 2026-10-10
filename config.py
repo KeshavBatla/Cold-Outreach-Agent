@@ -13,21 +13,28 @@ load_dotenv()
 
 # Base project paths
 PROJECT_ROOT = Path(__file__).resolve().parent
+RUNS_DIR = PROJECT_ROOT / "runs"
 COVER_LETTER_DIR = PROJECT_ROOT
 CREDENTIALS_FILE = PROJECT_ROOT / "credentials.json"
 TOKEN_FILE = PROJECT_ROOT / "token.json"
-FONT_REGULAR = PROJECT_ROOT / "DejaVuSans.ttf"
-FONT_BOLD = PROJECT_ROOT / "DejaVuSans-Bold.ttf"
 
-# Resolve default CV / resume path
-if (PROJECT_ROOT / "Keshav_CV_3rd.pdf").exists():
-    DEFAULT_RESUME_PATH = str(PROJECT_ROOT / "Keshav_CV_3rd.pdf")
-else:
-    DEFAULT_RESUME_PATH = str(PROJECT_ROOT / "resume.pdf")
+# Typography and fonts
+FONTS_DIR = PROJECT_ROOT / "assets" / "fonts"
+FONT_REGULAR = FONTS_DIR / "DejaVuSans.ttf"
+FONT_BOLD = FONTS_DIR / "DejaVuSans-Bold.ttf"
+
+
+def get_run_dir(thread_id: str) -> Path:
+    """
+    Ensure and return an isolated runs directory for a specific thread_id.
+    """
+    run_dir = RUNS_DIR / str(thread_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 # API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "models/gemini-2.5-flash")
+MODEL_NAME = os.getenv("MODEL_NAME", "models/gemini-3.1-flash-lite")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_API")
 

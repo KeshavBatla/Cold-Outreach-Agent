@@ -2,7 +2,6 @@
 Prompts package for Cold Outreach Agent.
 """
 
-from prompts.candidate import CANDIDATE_PROFILE, CANDIDATE_CV, EXAMPLE_COVER_LETTER
 from prompts.researcher import (
     RESEARCHER_QUERY_SYSTEM_PROMPT,
     RESEARCHER_QUERY_HUMAN_PROMPT,
@@ -23,9 +22,6 @@ from prompts.email_writer import (
 )
 
 __all__ = [
-    "CANDIDATE_PROFILE",
-    "CANDIDATE_CV",
-    "EXAMPLE_COVER_LETTER",
     "RESEARCHER_QUERY_SYSTEM_PROMPT",
     "RESEARCHER_QUERY_HUMAN_PROMPT",
     "EXTRACTION_SYSTEM_PROMPT",
@@ -39,4 +35,3 @@ __all__ = [
     "EMAIL_EVALUATION_TEMPLATE",
     "EMAIL_SUBJECT_SYSTEM_TEMPLATE",
 ]
-

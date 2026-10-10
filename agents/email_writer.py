@@ -4,12 +4,12 @@ Generates concise, personalized 3-5 sentence cold outreach email bodies,
 with automated LLM evaluation and refinement feedback.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
-import config
+import config as app_config
 from graph.state import EmailwriterState, OutreachState
 from prompts.email_writer import (
     EMAIL_WRITER_SYSTEM_TEMPLATE,
@@ -33,9 +33,13 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
     contact_name = state.get("contact_name") or "Hiring Team"
     research = state.get("research_summary") or ""
     cover_letter = state.get("cover_letter") or ""
+    candidate_name = state.get("candidate_name") or "Applicant"
+    candidate_profile = state.get("candidate_profile") or ""
     feedback = state.get("evaluator_feedback")
 
     system_text = EMAIL_WRITER_SYSTEM_TEMPLATE.format(
+        candidate_name=candidate_name,
+        candidate_profile=candidate_profile,
         company=company,
         contact_name=contact_name,
         role=role,
@@ -46,7 +50,7 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
     if feedback:
         system_text += f"\nPrevious draft's feedback (fix this): {feedback}\n"
 
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     response = llm.invoke(
         [
             SystemMessage(content=system_text),
@@ -67,7 +71,7 @@ def llm_evaluator_email(state: EmailwriterState) -> Dict[str, Any]:
             "retry_count": current_retry + 1,
         }
 
-    llm = config.get_llm()
+    llm = app_config.get_llm()
     evaluator = get_email_evaluator(llm)
 
     messages = [
@@ -93,7 +97,7 @@ def llm_evaluator_email(state: EmailwriterState) -> Dict[str, Any]:
 def llm_router_email(state: EmailwriterState) -> str:
     if state.get("email_sufficient"):
         return END
-    if state.get("retry_count", 0) >= state.get("max_retries", config.MAX_RETRIES):
+    if state.get("retry_count", 0) >= state.get("max_retries", app_config.MAX_RETRIES):
         return END
     return "emailcontent"
 
@@ -116,11 +120,18 @@ def build_emailwriter_graph(checkpointer=None):
 emailwriter_graph = build_emailwriter_graph()
 
 
-def run_emailwriter(state: OutreachState, cfg: Dict[str, Any]) -> Dict[str, Any]:
+from langchain_core.runnables import RunnableConfig
+
+
+def run_emailwriter(state: OutreachState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Execute the Emailwriter subgraph.
     """
-    parent_thread_id = cfg["configurable"]["thread_id"]
+    cfg = config or {}
+    parent_thread_id = (
+        (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None)
+        or (Path(state.get("run_dir")).name if state.get("run_dir") else "run")
+    )
     attempt_num = state.get("email_attempts", 0)
     clean_config = {"configurable": {"thread_id": f"{parent_thread_id}_email_{attempt_num}"}}
 
@@ -131,8 +142,10 @@ def run_emailwriter(state: OutreachState, cfg: Dict[str, Any]) -> Dict[str, Any]
         "job_role": state.get("job_role"),
         "research_summary": state.get("research_summary"),
         "cover_letter": state.get("cover_letter"),
+        "candidate_name": state.get("candidate_name"),
+        "candidate_profile": state.get("candidate_profile"),
         "retry_count": 0,
-        "max_retries": state.get("max_retries", config.MAX_RETRIES),
+        "max_retries": state.get("max_retries", app_config.MAX_RETRIES),
     }
     result = emailwriter_graph.invoke(sub_input, clean_config)
     print("\n--- EMAIL DRAFT ---")
