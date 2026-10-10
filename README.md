@@ -313,6 +313,13 @@ Features available in the Streamlit app:
 
 ## 👨‍💻 Project Links
 
+<<<<<<< HEAD
 - **Repository**: Cold Outreach Multi-Agent System
 - **License**: MIT
+=======
+- **Author**: Keshav Batla
+- **Email**: batlakeshav@gmail.com
+- **LinkedIn**: [linkedin.com/in/keshav-batla](https://www.linkedin.com/in/keshav-batla-715a38330/)
+- **GitHub**: [github.com/keshavbatla](https://github.com/keshavbatla)
+>>>>>>> 13b3ff835c0b026aeb09977ae28a66e679c6925b
 
