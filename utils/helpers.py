@@ -3,7 +3,7 @@ Helper utilities for text extraction, validation, and deduplication.
 """
 
 import re
-from typing import Any, Set
+from typing import Any, Optional, Set
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -18,10 +18,6 @@ PLACEHOLDER_VALUES = {
     "not available",
 }
 
-# In-memory registry of already contacted companies (can be populated or extended)
-CONTACTED_COMPANIES: Set[str] = set()
-
-
 def extract_text(content: Any) -> str:
     """
     Safely extract plain text from diverse LangChain message content types
@@ -35,21 +31,24 @@ def extract_text(content: Any) -> str:
     return str(content).strip() if content is not None else ""
 
 
-def is_already_mailed(company_name: str, contacted_set: Set[str] = None) -> bool:
+def is_already_mailed(company_name: str, contacted_set: Optional[Set[str]] = None) -> bool:
     """
-    Check if a company has already been targeted/contacted to prevent spam or duplicate outreach.
+    Check persistent successful-outreach history, or an explicitly supplied legacy test set.
     """
     if not company_name:
         return False
     target = company_name.strip().lower()
-    registry = contacted_set if contacted_set is not None else CONTACTED_COMPANIES
-    return any(target in c or c in target for c in registry)
+    if contacted_set is not None:
+        return any(target == company.strip().lower() for company in contacted_set)
+    from persistence import company_block_reason
+
+    return company_block_reason(company_name, None) == "Recently contacted through this service."
 
 
 def register_contacted_company(company_name: str) -> None:
     """
-    Add a company name to the in-memory contacted registry.
+    Reject the old unsafe API, which could mark research as successful delivery.
     """
-    if company_name:
-        CONTACTED_COMPANIES.add(company_name.strip().lower())
-
+    raise RuntimeError(
+        "Research is not a successful outreach event. Record delivery through the persistence repository."
+    )

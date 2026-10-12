@@ -4,6 +4,8 @@ Gmail API client integration for OAuth authentication, message construction, att
 
 import os
 import base64
+import re
+import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from email.mime.multipart import MIMEMultipart
@@ -23,6 +25,7 @@ except ImportError:
     build = None
 
 import config
+from persistence import ensure_external_call_allowed, record_provider_usage
 
 
 def get_gmail_service(token_path: Optional[str] = None):
@@ -94,38 +97,121 @@ def send_email(
     body: str,
     attachment_paths: Optional[List[str]] = None,
     dry_run: bool = False,
+    approved: bool = False,
+    run_id: str = "gmail",
 ) -> Dict[str, Any]:
     """
     Construct and send an email via Gmail API, or simulate in dry-run mode.
     """
-    if not to_email:
-        return {"sent": False, "error": "No recipient email provided"}
+    normalized_email = (to_email or "").strip().casefold()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized_email):
+        return {"sent": False, "delivery_status": "failed", "error": "Invalid recipient email address"}
+    if not approved:
+        return {
+            "sent": False,
+            "delivery_status": "failed",
+            "error": "Email dispatch requires explicit human approval.",
+        }
+
+    missing = [path for path in (attachment_paths or []) if path and not os.path.isfile(path)]
+    if missing:
+        return {
+            "sent": False,
+            "delivery_status": "failed",
+            "error": "Missing attachment(s): " + ", ".join(missing),
+        }
+
+    if config.MOCK_MODE:
+        failed = config.MOCK_SCENARIO == "failed_send"
+        return {
+            "sent": False,
+            "simulated": not failed,
+            "delivery_status": "failed" if failed else "simulated",
+            "error": "Simulated Gmail send failure" if failed else None,
+            "message_id": "mock-message-id" if not failed else None,
+        }
 
     if dry_run or config.DRY_RUN:
         print(f"\n[DRY RUN] Would send to: {to_email}")
         print(f"Subject: {subject}")
         print(f"Attachments: {attachment_paths}")
         print(f"Body:\n{body}\n")
-        return {"sent": False, "dry_run": True, "message_id": "dry-run-preview"}
+        return {"sent": False, "dry_run": True, "delivery_status": "dry_run", "message_id": "dry-run-preview"}
 
+    ensure_external_call_allowed(run_id)
     message = MIMEMultipart()
-    message["to"] = to_email
+    message["to"] = normalized_email
     message["subject"] = subject
     message.attach(MIMEText(body, "plain"))
 
-    if attachment_paths:
-        for path in attachment_paths:
-            if path:
-                attached = attach_file(message, path)
-                if not attached:
-                    print(f"[send_email] Warning: Could not attach {path}")
-
     try:
         service = get_gmail_service()
+    except Exception as e:
+        record_provider_usage(
+            run_id=run_id,
+            provider="gmail",
+            operation="authentication",
+            successful=False,
+            error=str(e),
+        )
+        return {"sent": False, "dry_run": False, "delivery_status": "failed", "error": str(e)}
+
+    if attachment_paths:
+        for path in attachment_paths:
+            if path and not attach_file(message, path):
+                return {
+                    "sent": False,
+                    "dry_run": False,
+                    "delivery_status": "failed",
+                    "error": f"Could not attach required file: {path}",
+                }
+
+    started = time.monotonic()
+    try:
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
         sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
-        return {"sent": True, "dry_run": False, "message_id": sent.get("id")}
+        message_id = sent.get("id") if isinstance(sent, dict) else None
+        if not message_id:
+            record_provider_usage(
+                run_id=run_id,
+                provider="gmail",
+                operation="send",
+                successful=False,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error="Gmail returned no message ID; delivery is ambiguous.",
+            )
+            return {
+                "sent": False,
+                "dry_run": False,
+                "delivery_status": "unknown",
+                "error": "Gmail returned no message ID; delivery is ambiguous.",
+            }
+        record_provider_usage(
+            run_id=run_id,
+            provider="gmail",
+            operation="send",
+            successful=True,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return {
+            "sent": True,
+            "dry_run": False,
+            "delivery_status": "sent",
+            "message_id": message_id,
+        }
     except Exception as e:
         print(f"[send_email] Error sending email: {e}")
-        return {"sent": False, "dry_run": False, "error": str(e)}
-
+        record_provider_usage(
+            run_id=run_id,
+            provider="gmail",
+            operation="send",
+            successful=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error=str(e),
+        )
+        return {
+            "sent": False,
+            "dry_run": False,
+            "delivery_status": "unknown",
+            "error": str(e),
+        }

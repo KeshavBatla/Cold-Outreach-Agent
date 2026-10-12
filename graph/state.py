@@ -16,6 +16,8 @@ class OutreachState(MessagesState):
     job_role: Optional[str]
     job_description: Optional[str]
     research_summary: Optional[str]
+    company_domain: Optional[str]
+    research_run_id: Optional[str]
 
     cover_letter: Optional[str]
     email_body: Optional[str]
@@ -35,9 +37,15 @@ class OutreachState(MessagesState):
     location_preference: Optional[str]  # e.g., "remote", "India-based"
 
     research_approved: bool
+    research_outcome: Optional[str]
+    research_error: Optional[str]
+    cache_key: Optional[str]
+    research_cache_hit: bool
     cover_letter_approved: bool
     email_approved: bool
     final_email_sent: bool
+    delivery_status: Optional[str]
+    usage_summary: Optional[Dict[str, Any]]
 
     cover_letter_attempts: int
     email_attempts: int
@@ -71,10 +79,19 @@ class ResearcherState(MessagesState):
     hunter_only_attempts: int
     evaluator_feedback: Optional[str]
     human_decision: Optional[str]
+    research_outcome: Optional[str]
+    research_error: Optional[str]
+    cache_key: Optional[str]
+    research_cache_hit: bool
     retry_count: int
     max_retries: int
     hunter_candidates: Optional[list]
     hunter_candidate_index: int
+    company_domain: Optional[str]
+    contact_verified: Optional[bool]
+    contact_attempts: int
+    owner_id: Optional[str]
+    research_run_id: Optional[str]
 
 
 class CoverwriterState(MessagesState):
@@ -85,6 +102,7 @@ class CoverwriterState(MessagesState):
     job_role: Optional[str]
     job_description: Optional[str]
     research_summary: Optional[str]
+    research_run_id: Optional[str]
     raw_cv_text: Optional[str]
     example_cover_letter: Optional[str]
     cover_letter: Optional[str]
@@ -106,6 +124,7 @@ class EmailwriterState(MessagesState):
     cover_letter: Optional[str]
     candidate_name: Optional[str]
     candidate_profile: Optional[str]
+    research_run_id: Optional[str]
     email_body: Optional[str]
     evaluator_feedback: Optional[str]
     email_sufficient: Optional[bool]
@@ -128,6 +147,11 @@ class EmaildrafterState(MessagesState):
     candidate_name: Optional[str]
     resume_path: Optional[str]
     run_dir: Optional[str]
+    company_domain: Optional[str]
+    research_run_id: Optional[str]
+    owner_id: Optional[str]
     human_decision: Optional[str]
     sent: bool
+    delivery_status: Optional[str]
+    reservation_token: Optional[str]
     excel_log_entry: Optional[Dict[str, Any]]

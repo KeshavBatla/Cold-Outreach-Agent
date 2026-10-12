@@ -5,6 +5,7 @@ with an automated LLM evaluation and refinement feedback loop.
 """
 
 from typing import Dict, Any, Optional
+from pathlib import Path
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -18,6 +19,7 @@ from prompts.cover_writer import (
 )
 from evaluation.llm_evaluator import CoverLetterEvaluation, get_coverletter_evaluator
 from utils.helpers import extract_text
+from utils.observability import invoke_with_usage
 
 
 def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
@@ -38,6 +40,14 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
     candidate_cv = state.get("raw_cv_text", "")
     if not candidate_cv or not candidate_cv.strip():
         raise ValueError("raw_cv_text is empty. Cannot write a cover letter without a CV.")
+    if app_config.MOCK_MODE:
+        return {
+            "cover_letter": (
+                f"Dear Hiring Team,\n\nI am interested in the {role} opportunity at {company}. "
+                "My attached resume provides further details about my background.\n\n"
+                "Thank you for your consideration."
+            )
+        }
 
     example_cover_letter = state.get("example_cover_letter", "")
 
@@ -64,11 +74,16 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
         system_text += f"\nPrevious draft's feedback (fix this): {feedback}\n"
 
     llm = app_config.get_llm()
-    response = llm.invoke(
+    response = invoke_with_usage(
+        llm.invoke,
         [
             SystemMessage(content=system_text),
             HumanMessage(content=COVER_LETTER_HUMAN_PROMPT),
-        ]
+        ],
+        provider="gemini",
+        operation="cover_letter_generation",
+        model=app_config.MODEL_NAME,
+        run_id=state.get("research_run_id") or "unknown",
     )
     return {"cover_letter": extract_text(response.content)}
 
@@ -84,6 +99,8 @@ def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
             "letter_sufficient": False,
             "retry_count": current_retry + 1,
         }
+    if app_config.MOCK_MODE:
+        return {"evaluator_feedback": "Deterministic mock evaluation passed.", "letter_sufficient": True}
 
     llm = app_config.get_llm()
     evaluator = get_coverletter_evaluator(llm)
@@ -96,7 +113,14 @@ def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
         ),
         HumanMessage(content=cover_letter),
     ]
-    result = evaluator.invoke({"messages": messages})
+    result = invoke_with_usage(
+        evaluator.invoke,
+        {"messages": messages},
+        provider="gemini",
+        operation="cover_letter_evaluation",
+        model=app_config.MODEL_NAME,
+        run_id=state.get("research_run_id") or "unknown",
+    )
     evaluation: CoverLetterEvaluation = result["responses"][0]
     print(f"[llm_evaluator_cover] is_sufficient={evaluation.is_sufficient}, feedback={evaluation.feedback[:100]}")
 
@@ -159,6 +183,7 @@ def run_coverwriter(state: OutreachState, config: Optional[RunnableConfig] = Non
         "job_role": state.get("job_role"),
         "job_description": state.get("job_description"),
         "research_summary": state.get("research_summary"),
+        "research_run_id": (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None) or "run",
         "raw_cv_text": state.get("raw_cv_text"),
         "example_cover_letter": state.get("example_cover_letter"),
         "retry_count": 0,
@@ -175,4 +200,3 @@ def run_coverwriter(state: OutreachState, config: Optional[RunnableConfig] = Non
         "cover_letter_approved": bool(result.get("letter_sufficient")),
         "cover_letter_attempts": state.get("cover_letter_attempts", 0) + 1,
     }
-

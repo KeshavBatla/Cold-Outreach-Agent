@@ -46,6 +46,7 @@ def test_verify_email_no_key_behavior(monkeypatch):
 
     import config
     monkeypatch.setattr(config, "HUNTER_API_KEY", None)
+    monkeypatch.setattr(config, "MOCK_MODE", False)
 
     # Without ALLOW_UNVERIFIED_EMAILS=true, should return False
     assert verify_email("test@example.com", api_key=None) is False
@@ -53,4 +54,3 @@ def test_verify_email_no_key_behavior(monkeypatch):
     # With ALLOW_UNVERIFIED_EMAILS=true, should return True
     monkeypatch.setenv("ALLOW_UNVERIFIED_EMAILS", "true")
     assert verify_email("test@example.com", api_key=None) is True
-

@@ -199,15 +199,19 @@ cold-outreach-agent/
 
 ## ⚙️ Setup & Installation
 
+### Supported Python versions
+
+Use Python 3.11 or 3.12. The project is exercised with Python 3.12; no claim is made that a specific Gemini model or provider quota is available for every account.
+
 ### 1. Clone & Enter Workspace
 ```bash
-git clone https://github.com/yourusername/cold-outreach-agent.git
-cd cold-outreach-agent
+git clone https://github.com/KeshavBatla/Cold-Outreach-Agent.git
+cd Cold-Outreach-Agent
 ```
 
 ### 2. Create and Activate Virtual Environment
 ```bash
-python -m venv .venv
+py -3.12 -m venv .venv
 
 # On Windows (PowerShell):
 .venv\Scripts\Activate.ps1
@@ -218,7 +222,8 @@ source .venv/bin/activate
 
 ### 3. Install Dependencies
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
 ---
@@ -226,71 +231,65 @@ pip install -r requirements.txt
 ## 🔑 Environment Variables
 
 Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
+
+```powershell
+Copy-Item .env.example .env
 ```
 
-Populate the values in `.env`:
-```env
-# Gemini API Key (Required)
-GEMINI_API_KEY=your_gemini_api_key_here
-MODEL_NAME=models/gemini-2.5-flash
+On Linux/macOS use `cp .env.example .env`. Configure credentials for any live provider you plan to use. `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `TAVILY_API_KEY`, and `HUNTER_API_KEY` are needed for their respective live integrations. Gmail additionally requires a local OAuth `credentials.json` and authorizes locally when first used.
 
-# Tavily API Key (Required for web search)
-TAVILY_API_KEY=tvly-your_tavily_api_key_here
+Important settings:
 
-# Hunter.io API Key (Required for contact discovery and verification)
-HUNTER_API_KEY=your_hunter_api_key_here
+- `MODEL_NAME` selects the Gemini model. The default is `models/gemini-3.1-flash-lite`; verify access and quotas with your own Google account.
+- `MOCK_MODE=true` switches provider and generation paths to deterministic fixtures and does not require API keys.
+- `DRY_RUN=true` skips Gmail delivery, while allowing live research/generation if `MOCK_MODE=false`.
+- `DATABASE_URL` defaults to an ignored local SQLite database under `runs/`. PostgreSQL can be configured with `postgresql://user:password@host:5432/database` using psycopg 3.
+- `OUTREACH_OWNER_ID` identifies the current local owner for exclusions; it is not an authentication mechanism.
+- Duplicate cooldown, cache, verification freshness, contact and external-call limits can be configured using `.env.example`.
 
-# Set to 'true' to simulate sending without transmitting real emails
-DRY_RUN=true
-
-# LangSmith Tracing (Optional)
-LANGSMITH_TRACING_V2=false
-LANGSMITH_API_KEY=
-LANGSMITH_PROJECT=cold-outreach-agent
-```
-
----
+Do not put credentials, OAuth tokens, CVs, or generated PDFs under version control.
 
 ## 💻 Running Locally
 
-### CLI Mode
+The CLI requires a local CV:
 
-**Target a specific company:**
-```bash
-python main.py --company "Simular"
+```powershell
+python main.py --cv path\to\resume.pdf --company "Cohere" --dry-run
+python main.py --cv path\to\resume.pdf --mode speculative --dry-run
 ```
 
-**Run in speculative discovery mode (finds opportunities based on profile):**
-```bash
-python main.py --mode speculative
-```
+Launch the Streamlit UI (a CV upload is required before starting a run):
 
-**Force Dry-Run simulation:**
-```bash
-python main.py --company "Cohere" --dry-run
-```
-
-**Inspect LangGraph architecture:**
-```bash
-python main.py --inspect-graph
-```
-
----
-
-### Streamlit Web Interface
-
-Launch the interactive web UI:
-```bash
+```powershell
 streamlit run app.py
 ```
 
-Features available in the Streamlit app:
-- Visual step-by-step progress tracking.
-- Interactive human review of research findings.
-- Live preview and inline editing of generated cover letters and email bodies.
-- Seamless one-click Dry-Run testing or Gmail API transmission.
+For deterministic, provider-free UI testing:
+
+```powershell
+$env:MOCK_MODE = "true"
+$env:MOCK_SCENARIO = "good"
+$env:DRY_RUN = "false"
+streamlit run app.py
+```
+
+`MOCK_MODE` is independent of `DRY_RUN`: mock mode never transmits email, even when dry-run is false. `MOCK_SCENARIO` accepts `good`, `role_mismatch`, `no_contacts`, `invalid_contact`, `provider_timeout`, and `failed_send`.
+
+Initialize the schema by starting the application or running:
+
+```powershell
+python -c "import persistence; persistence.get_engine()"
+```
+
+Schema initialization uses SQLAlchemy `create_all` and is repeatable; no Alembic migration history exists yet. For schema changes, back up the database and apply a planned migration before deploying the changed model.
+
+Run the automated tests (external services are mocked and tests never send real email):
+
+```powershell
+python -m pytest -q
+```
+
+Inspect the graph with `python main.py --inspect-graph`.
 
 ---
 
@@ -313,13 +312,9 @@ Features available in the Streamlit app:
 
 ## 👨‍💻 Project Links
 
-<<<<<<< HEAD
 - **Repository**: Cold Outreach Multi-Agent System
 - **License**: MIT
-=======
 - **Author**: Keshav Batla
 - **Email**: batlakeshav@gmail.com
 - **LinkedIn**: [linkedin.com/in/keshav-batla](https://www.linkedin.com/in/keshav-batla-715a38330/)
 - **GitHub**: [github.com/keshavbatla](https://github.com/keshavbatla)
->>>>>>> 13b3ff835c0b026aeb09977ae28a66e679c6925b
-

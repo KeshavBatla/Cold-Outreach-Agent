@@ -5,6 +5,7 @@ with automated LLM evaluation and refinement feedback.
 """
 
 from typing import Dict, Any, Optional
+from pathlib import Path
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -18,6 +19,7 @@ from prompts.email_writer import (
 )
 from evaluation.llm_evaluator import EmailEvaluation, get_email_evaluator
 from utils.helpers import extract_text
+from utils.observability import invoke_with_usage
 
 
 def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
@@ -36,6 +38,14 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
     candidate_name = state.get("candidate_name") or "Applicant"
     candidate_profile = state.get("candidate_profile") or ""
     feedback = state.get("evaluator_feedback")
+    if app_config.MOCK_MODE:
+        return {
+            "email_body": (
+                f"Hello {contact_name}, I am reaching out about the {role} opportunity at {company}. "
+                "My attached resume and cover letter provide more context on my background. "
+                "Would you be available for a brief conversation?"
+            )
+        }
 
     system_text = EMAIL_WRITER_SYSTEM_TEMPLATE.format(
         candidate_name=candidate_name,
@@ -51,11 +61,16 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
         system_text += f"\nPrevious draft's feedback (fix this): {feedback}\n"
 
     llm = app_config.get_llm()
-    response = llm.invoke(
+    response = invoke_with_usage(
+        llm.invoke,
         [
             SystemMessage(content=system_text),
             HumanMessage(content=EMAIL_WRITER_HUMAN_PROMPT),
-        ]
+        ],
+        provider="gemini",
+        operation="email_generation",
+        model=app_config.MODEL_NAME,
+        run_id=state.get("research_run_id") or "unknown",
     )
     return {"email_body": extract_text(response.content)}
 
@@ -70,6 +85,8 @@ def llm_evaluator_email(state: EmailwriterState) -> Dict[str, Any]:
             "email_sufficient": False,
             "retry_count": current_retry + 1,
         }
+    if app_config.MOCK_MODE:
+        return {"evaluator_feedback": "Deterministic mock evaluation passed.", "email_sufficient": True}
 
     llm = app_config.get_llm()
     evaluator = get_email_evaluator(llm)
@@ -82,7 +99,14 @@ def llm_evaluator_email(state: EmailwriterState) -> Dict[str, Any]:
         ),
         HumanMessage(content=email_body),
     ]
-    result = evaluator.invoke({"messages": messages})
+    result = invoke_with_usage(
+        evaluator.invoke,
+        {"messages": messages},
+        provider="gemini",
+        operation="email_evaluation",
+        model=app_config.MODEL_NAME,
+        run_id=state.get("research_run_id") or "unknown",
+    )
     evaluation: EmailEvaluation = result["responses"][0]
 
     updates = {
@@ -144,6 +168,7 @@ def run_emailwriter(state: OutreachState, config: Optional[RunnableConfig] = Non
         "cover_letter": state.get("cover_letter"),
         "candidate_name": state.get("candidate_name"),
         "candidate_profile": state.get("candidate_profile"),
+        "research_run_id": (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None) or "run",
         "retry_count": 0,
         "max_retries": state.get("max_retries", app_config.MAX_RETRIES),
     }
@@ -158,4 +183,3 @@ def run_emailwriter(state: OutreachState, config: Optional[RunnableConfig] = Non
         "email_approved": bool(result.get("email_sufficient")),
         "email_attempts": attempt_num + 1,
     }
-

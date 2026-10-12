@@ -26,6 +26,11 @@ def manager_router(state: OutreachState) -> str:
     """
     Route to the next agent based on completion and approval flags.
     """
+    if state.get("research_outcome") and not state.get("research_approved"):
+        print(
+            f"[Manager] Research outcome is {state.get('research_outcome')!r} without explicit approval; stopping."
+        )
+        return END
     if not state.get("research_approved"):
         return "Researcher"
     if not state.get("cover_letter_approved"):
@@ -71,4 +76,3 @@ def build_manager_graph(checkpointer=None):
 
 
 manager_graph = build_manager_graph()
-

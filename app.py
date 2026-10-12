@@ -181,40 +181,85 @@ with tab_pipeline:
     if st.session_state.stage == "running_researcher":
         with st.spinner("🔍 Researcher Agent is scanning the web, extracting job roles, and discovering verified contacts..."):
             cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
-            def ui_approve(_):
-                return "approve"
+            def wait_for_research_review(_):
+                return "pending"
 
-            res = run_researcher(st.session_state.outreach_state, cfg, decision_callback=ui_approve)
+            res = run_researcher(st.session_state.outreach_state, cfg, decision_callback=wait_for_research_review)
             st.session_state.outreach_state.update(res)
             st.session_state.stage = "research_review"
             st.rerun()
 
     # 2. Human-In-The-Loop: Research Review
     if st.session_state.stage == "research_review":
-        st.success("✅ Research Phase Complete — Human Review Required")
         state = st.session_state.outreach_state
-
-        col_left, col_right = st.columns([1, 1])
-        with col_left:
-            st.markdown(f"**Target Company:** `{state.get('company_name')}`")
-            st.markdown(f"**Target Role:** `{state.get('job_role')}`")
-            st.markdown(f"**Contact:** `{state.get('contact_name')}` (`{state.get('contact_email')}`)")
-        with col_right:
-            st.markdown(f"**Job Summary:**\n{state.get('job_description') or 'N/A'}")
-            st.markdown(f"**Research Insights:**\n{state.get('research_summary') or 'N/A'}")
-
-        st.markdown("---")
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("👍 Approve Research & Generate Cover Letter", type="primary", use_container_width=True):
-                st.session_state.outreach_state["research_approved"] = True
-                st.session_state.stage = "running_coverwriter"
-                st.rerun()
-        with c2:
-            if st.button("🔄 Reject & Re-run Research", use_container_width=True):
-                st.session_state.outreach_state["research_approved"] = False
+        outcome = state.get("research_outcome")
+        if outcome != "awaiting_review":
+            message = state.get("research_error") or outcome or "No candidate was found."
+            st.error(f"Research stopped ({message}). No candidate has been approved.")
+            if st.button("Retry research", use_container_width=True):
+                state["company_name"] = None if state.get("mode") == "speculative" else state.get("company_name")
+                state["research_outcome"] = None
+                st.session_state.thread_id = f"st_run_{uuid.uuid4().hex[:8]}"
                 st.session_state.stage = "running_researcher"
                 st.rerun()
+        else:
+            st.success("✅ Research Candidate Ready — Explicit Human Review Required")
+            col_left, col_right = st.columns([1, 1])
+            with col_left:
+                st.markdown(f"**Target Company:** `{state.get('company_name')}`")
+                st.markdown(f"**Target Role:** `{state.get('job_role')}`")
+                st.markdown(f"**Contact:** `{state.get('contact_name')}` (`{state.get('contact_email')}`)")
+            with col_right:
+                st.markdown(f"**Job Summary:**\n{state.get('job_description') or 'N/A'}")
+                st.markdown(f"**Research Insights:**\n{state.get('research_summary') or 'N/A'}")
+
+            st.markdown("---")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("👍 Approve Research & Generate Cover Letter", type="primary", use_container_width=True):
+                    cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
+                    res = run_researcher(
+                        state,
+                        cfg,
+                        decision_callback=lambda _state: "approve",
+                    )
+                    state.update(res)
+                    if res.get("research_outcome") != "approved":
+                        st.error("The researcher graph did not record the explicit approval.")
+                    else:
+                        st.session_state.stage = "running_coverwriter"
+                        st.rerun()
+            with c2:
+                if st.button("Reject this research", use_container_width=True):
+                    cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
+                    res = run_researcher(
+                        state,
+                        cfg,
+                        decision_callback=lambda _state: "reject",
+                    )
+                    state.update(res)
+                    st.session_state.stage = "research_rejected"
+                    st.rerun()
+
+    if st.session_state.stage == "research_rejected":
+        st.warning("Research was rejected and recorded as an owner-specific exclusion. No writing or email dispatch occurred.")
+        if st.button("Search for another company", type="primary", use_container_width=True):
+            state = st.session_state.outreach_state
+            state.update({
+                "company_name": None,
+                "company_domain": None,
+                "research_approved": False,
+                "research_outcome": None,
+                "retry_count": 0,
+                "cover_letter_approved": False,
+                "email_approved": False,
+                "final_email_sent": False,
+                "delivery_status": None,
+            })
+            state["mode"] = "speculative"
+            st.session_state.thread_id = f"st_run_{uuid.uuid4().hex[:8]}"
+            st.session_state.stage = "running_researcher"
+            st.rerun()
 
     # 3. Running Coverwriter Agent
     if st.session_state.stage == "running_coverwriter":
@@ -258,7 +303,7 @@ with tab_pipeline:
         with st.spinner("📑 Emaildrafter Agent is generating subject line and packaging attachments..."):
             cfg = {"configurable": {"thread_id": st.session_state.thread_id}}
             def wait_for_ui_send(_):
-                return "reject"  # Pause before sending
+                return "pending"
 
             res = run_emaildrafter(st.session_state.outreach_state, cfg, decision_callback=wait_for_ui_send)
             st.session_state.outreach_state.update(res)
@@ -304,12 +349,23 @@ with tab_pipeline:
 
     # 8. Completed
     if st.session_state.stage == "completed":
-        st.balloons()
         state = st.session_state.outreach_state
-        if state.get("final_email_sent"):
+        status = state.get("delivery_status")
+        if status == "sent":
+            st.balloons()
             st.success("🎉 Outreach email successfully sent via Gmail API!")
+        elif status == "dry_run":
+            st.info("Dry run completed. Gmail was not called and no email was sent.")
+        elif status == "simulated":
+            st.info("Mock delivery simulation completed. No email was transmitted.")
+        elif status == "unknown":
+            st.error("The provider response was ambiguous. This run will not retry the send; verify delivery before taking further action.")
+        elif status == "failed":
+            st.error("Email dispatch failed. No successful delivery was recorded.")
+        elif status == "blocked":
+            st.warning("Dispatch was blocked by the persistent duplicate-outreach guard.")
         else:
-            st.info("ℹ️ Outreach completed in Dry Run mode (or transmission was skipped).")
+            st.info(f"Outreach ended without sending (status: {status or 'not sent'}).")
 
         st.json(state.get("excel_updates_pending"))
 

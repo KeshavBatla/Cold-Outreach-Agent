@@ -2,15 +2,20 @@
 .env
 .env.*
 !.env.example
+*.secret
 
 # Google & OAuth credentials
 credentials.json
 credentials*.json
 token*.json
 client_secret*.json
+oauth*.json
 
 # Isolated run directories
 runs/
+*.sqlite
+*.sqlite3
+*.db
 
 # Resumes and uploaded documents
 resume.pdf
@@ -51,6 +56,8 @@ Thumbs.db
 # Logs & temp
 *.log
 logs/
+*.out
+*.err
 
 # Data and spreadsheets
 data/
@@ -61,6 +68,9 @@ data/
 .pytest_cache/
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
 # Streamlit secrets
 .streamlit/secrets.toml

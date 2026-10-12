@@ -161,6 +161,9 @@ def generate_candidate_profile(cv_text: str, llm=None) -> str:
     """
     if not cv_text or not cv_text.strip():
         return ""
+    if config.MOCK_MODE:
+        lines = [line.strip() for line in cv_text.splitlines() if line.strip()]
+        return " ".join(lines[:4])[:300]
 
     try:
         model = llm or config.get_llm()
@@ -205,7 +208,7 @@ def extract_candidate_name(cv_text: str, llm=None) -> str:
     default_name = lines[0] if lines else "Candidate"
 
     # Attempt LLM extraction if key configured
-    if config.GEMINI_API_KEY or llm is not None:
+    if not config.MOCK_MODE and (config.GEMINI_API_KEY or llm is not None):
         try:
             model = llm or config.get_llm()
             system_prompt = (
@@ -226,12 +229,22 @@ def extract_candidate_name(cv_text: str, llm=None) -> str:
             pass
 
     # Heuristic fallback: inspect first few lines
+    prose_words = {
+        "and", "with", "using", "building", "experience", "engineer",
+        "developer", "professional", "summary", "skills",
+    }
     for line in lines[:5]:
+        email_match = re.search(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", line, re.IGNORECASE)
+        if email_match:
+            line = line[:email_match.start()]
+        line = re.split(r"\s*[|•]\s*", line, maxsplit=1)[0]
         cleaned = re.sub(r"[^a-zA-Z\s\.\-']", "", line).strip()
         words = cleaned.split()
         if 2 <= len(words) <= 4 and len(cleaned) < 50:
             lower = cleaned.lower()
             if not any(kw in lower for kw in ["curriculum", "resume", "cv", "page", "email", "phone"]):
+                if any(word.casefold() in prose_words for word in words):
+                    continue
                 return cleaned
 
     return default_name

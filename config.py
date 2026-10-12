@@ -40,6 +40,16 @@ HUNTER_API_KEY = os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_API")
 
 # System & Execution Flags
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes")
+MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ("true", "1", "yes")
+MOCK_SCENARIO = os.getenv("MOCK_SCENARIO", "good").strip().lower()
+DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(RUNS_DIR / 'outreach.sqlite3').as_posix()}"
+LOCAL_OWNER_ID = os.getenv("OUTREACH_OWNER_ID", "local")
+DUPLICATE_COOLDOWN_DAYS = int(os.getenv("DUPLICATE_COOLDOWN_DAYS", "30"))
+RESEARCH_CACHE_TTL_DAYS = int(os.getenv("RESEARCH_CACHE_TTL_DAYS", "30"))
+VERIFICATION_FRESHNESS_DAYS = int(os.getenv("VERIFICATION_FRESHNESS_DAYS", "30"))
+MAX_CONTACTS_PER_COMPANY = int(os.getenv("MAX_CONTACTS_PER_COMPANY", "5"))
+MAX_EMAIL_VERIFICATIONS = int(os.getenv("MAX_EMAIL_VERIFICATIONS", "3"))
+MAX_EXTERNAL_CALLS_PER_RUN = int(os.getenv("MAX_EXTERNAL_CALLS_PER_RUN", "20"))
 MAX_STAGE_ATTEMPTS = 2
 MAX_RETRIES = 3
 
@@ -51,6 +61,10 @@ def get_llm(model: str = None, temperature: float = 0.2) -> ChatGoogleGenerative
     """
     Factory function to instantiate the Google Generative AI LLM client.
     """
+    if MOCK_MODE:
+        raise RuntimeError(
+            "MOCK_MODE is enabled; agent mock fixtures must be used instead of creating a Gemini client."
+        )
     api_key = GEMINI_API_KEY
     if not api_key:
         raise ValueError(
@@ -61,4 +75,3 @@ def get_llm(model: str = None, temperature: float = 0.2) -> ChatGoogleGenerative
         google_api_key=api_key,
         temperature=temperature
     )
-
