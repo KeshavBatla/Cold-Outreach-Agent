@@ -4,23 +4,6 @@ An autonomous, multi-agent cold outreach system engineered with **LangGraph**, *
 
 ---
 
-## 📌 Table of Contents
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [System Architecture](#system-architecture)
-- [Agent Descriptions](#agent-descriptions)
-- [Evaluation & Refinement Architecture](#evaluation--refinement-architecture)
-- [Human-in-the-Loop (HITL) Architecture](#human-in-the-loop-hitl-architecture)
-- [Tech Stack](#tech-stack)
-- [Repository Structure](#repository-structure)
-- [Setup & Installation](#setup--installation)
-- [Environment Variables](#environment-variables)
-- [Running Locally](#running-locally)
-- [Security & Credentials Hygiene](#security--credentials-hygiene)
-- [Current Limitations & Next Steps](#current-limitations--next-steps)
-- [Author & Links](#author--links)
-
----
 
 ## 💡 Overview
 
