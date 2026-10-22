@@ -147,7 +147,11 @@ emailwriter_graph = build_emailwriter_graph()
 from langchain_core.runnables import RunnableConfig
 
 
-def run_emailwriter(state: OutreachState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+def run_emailwriter(
+    state: OutreachState,
+    config: Optional[RunnableConfig] = None,
+    graph=None,
+) -> Dict[str, Any]:
     """
     Execute the Emailwriter subgraph.
     """
@@ -172,12 +176,7 @@ def run_emailwriter(state: OutreachState, config: Optional[RunnableConfig] = Non
         "retry_count": 0,
         "max_retries": state.get("max_retries", app_config.MAX_RETRIES),
     }
-    result = emailwriter_graph.invoke(sub_input, clean_config)
-    print("\n--- EMAIL DRAFT ---")
-    print(result.get("email_body"))
-    print("--- EVALUATOR FEEDBACK ---")
-    print(result.get("evaluator_feedback"))
-
+    result = (graph or emailwriter_graph).invoke(sub_input, clean_config)
     return {
         "email_body": result.get("email_body"),
         "email_approved": bool(result.get("email_sufficient")),

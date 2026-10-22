@@ -42,7 +42,11 @@ HUNTER_API_KEY = os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_API")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes")
 MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ("true", "1", "yes")
 MOCK_SCENARIO = os.getenv("MOCK_SCENARIO", "good").strip().lower()
-DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(RUNS_DIR / 'outreach.sqlite3').as_posix()}"
+DATABASE_URL = (
+    os.getenv("APP_DATABASE_URL")
+    or os.getenv("DATABASE_URL")
+    or f"sqlite:///{(RUNS_DIR / 'outreach.sqlite3').as_posix()}"
+)
 LOCAL_OWNER_ID = os.getenv("OUTREACH_OWNER_ID", "local")
 DUPLICATE_COOLDOWN_DAYS = int(os.getenv("DUPLICATE_COOLDOWN_DAYS", "30"))
 RESEARCH_CACHE_TTL_DAYS = int(os.getenv("RESEARCH_CACHE_TTL_DAYS", "30"))

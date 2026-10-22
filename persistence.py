@@ -15,8 +15,10 @@ from urllib.parse import urlparse
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Float,
     func,
     Index,
@@ -193,6 +195,320 @@ class ProviderUsage(Base):
     error_information: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class AppUser(Base):
+    __tablename__ = "app_users"
+    __table_args__ = (
+        UniqueConstraint("identity_provider", "external_subject", name="uq_app_user_external_identity"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    identity_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class GmailConnection(Base):
+    __tablename__ = "gmail_connections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    account_email: Mapped[Optional[str]] = mapped_column(String(320))
+    status: Mapped[str] = mapped_column(String(24), default="unlinked", nullable=False)
+    scopes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    token_secret_ref: Mapped[Optional[str]] = mapped_column(String(512))
+    linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    __table_args__ = (
+        CheckConstraint("status IN ('unlinked', 'connected', 'revoked')", name="ck_gmail_connection_status"),
+    )
+
+
+class OutreachBatch(Base):
+    __tablename__ = "outreach_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    label: Mapped[Optional[str]] = mapped_column(String(240))
+    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("id", "owner_id", name="uq_outreach_batches_id_owner"),
+        CheckConstraint(
+            "status IN ('queued', 'researching', 'research_review', 'drafting', 'draft_review', 'completed', 'failed')",
+            name="ck_outreach_batch_status",
+        ),
+    )
+
+
+class BatchItem(Base):
+    __tablename__ = "batch_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["batch_id", "owner_id"],
+            ["outreach_batches.id", "outreach_batches.owner_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("id", "owner_id", name="uq_batch_items_id_owner"),
+        UniqueConstraint("id", "owner_id", "batch_id", name="uq_batch_items_id_owner_batch"),
+        CheckConstraint(
+            "status IN ('queued', 'researching', 'research_review', 'rejected', 'ineligible', 'drafting', 'draft_review', 'failed', 'completed')",
+            name="ck_batch_item_status",
+        ),
+        CheckConstraint(
+            "research_decision IS NULL OR research_decision IN ('approved', 'rejected')",
+            name="ck_batch_item_research_decision",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_company: Mapped[Optional[str]] = mapped_column(String(300))
+    target_domain: Mapped[Optional[str]] = mapped_column(String(255))
+    target_role: Mapped[Optional[str]] = mapped_column(String(300))
+    target_description: Mapped[Optional[str]] = mapped_column(Text)
+    candidate_name: Mapped[Optional[str]] = mapped_column(String(200))
+    cv_artifact_id: Mapped[Optional[str]] = mapped_column(ForeignKey("private_artifacts.id", ondelete="SET NULL"))
+    example_letter_artifact_id: Mapped[Optional[str]] = mapped_column(ForeignKey("private_artifacts.id", ondelete="SET NULL"))
+    company_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
+    contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    research_decision: Mapped[Optional[str]] = mapped_column(String(16))
+    research_result: Mapped[Optional[dict]] = mapped_column(JSON)
+    failure_code: Mapped[Optional[str]] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class ApplicationRun(Base):
+    __tablename__ = "application_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["item_id", "owner_id", "batch_id"],
+            ["batch_items.id", "batch_items.owner_id", "batch_items.batch_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("thread_id", name="uq_application_runs_thread_id"),
+        UniqueConstraint("id", "owner_id", name="uq_application_runs_id_owner"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'paused', 'completed', 'failed', 'cancelled')",
+            name="ck_application_run_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    item_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    thread_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="queued", nullable=False, index=True)
+    phase: Mapped[Optional[str]] = mapped_column(String(48))
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    safe_error_code: Mapped[Optional[str]] = mapped_column(String(80))
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class RunEvent(Base):
+    __tablename__ = "run_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["batch_id", "owner_id"],
+            ["outreach_batches.id", "outreach_batches.owner_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("batch_id", "sequence", name="uq_run_events_batch_sequence"),
+        CheckConstraint("progress >= 0 AND progress <= 100", name="ck_run_event_progress"),
+        Index("ix_run_events_batch_sequence", "batch_id", "sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    run_id: Mapped[str] = mapped_column(ForeignKey("application_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    phase: Mapped[Optional[str]] = mapped_column(String(48))
+    status: Mapped[Optional[str]] = mapped_column(String(24))
+    progress: Mapped[Optional[int]] = mapped_column(Integer)
+    item_id: Mapped[Optional[str]] = mapped_column(String(36))
+    safe_detail: Mapped[Optional[str]] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False, index=True)
+
+
+class PrivateArtifact(Base):
+    __tablename__ = "private_artifacts"
+    __table_args__ = (
+        UniqueConstraint("storage_key", name="uq_private_artifacts_storage_key"),
+        CheckConstraint(
+            "artifact_type IN ('cv', 'example_letter', 'cover_letter', 'email_attachment')",
+            name="ck_private_artifact_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    item_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    artifact_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    filename: Mapped[Optional[str]] = mapped_column(String(255))
+    media_type: Mapped[Optional[str]] = mapped_column(String(120))
+    byte_size: Mapped[Optional[int]] = mapped_column(Integer)
+    sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class DraftVersion(Base):
+    __tablename__ = "draft_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["item_id", "owner_id", "batch_id"],
+            ["batch_items.id", "batch_items.owner_id", "batch_items.batch_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("item_id", "artifact_type", "version", name="uq_draft_item_artifact_version"),
+        UniqueConstraint(
+            "id", "owner_id", "item_id", "artifact_type",
+            name="uq_draft_version_approval_target",
+        ),
+        CheckConstraint("artifact_type IN ('cover_letter', 'email')", name="ck_draft_artifact_type"),
+        CheckConstraint("version > 0", name="ck_draft_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    item_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(String(500))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(24), default="agent", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class ApprovalDecision(Base):
+    __tablename__ = "approval_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["item_id", "owner_id", "batch_id"],
+            ["batch_items.id", "batch_items.owner_id", "batch_items.batch_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["draft_version_id", "owner_id", "item_id", "artifact_type"],
+            [
+                "draft_versions.id",
+                "draft_versions.owner_id",
+                "draft_versions.item_id",
+                "draft_versions.artifact_type",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "item_id", "artifact_type", "draft_version_id",
+            name="uq_approval_exact_draft_decision",
+        ),
+        UniqueConstraint(
+            "owner_id", "item_id", "artifact_type", "draft_version_id", "decision",
+            name="uq_approval_delivery_reference",
+        ),
+        CheckConstraint("decision IN ('approved', 'rejected')", name="ck_approval_decision"),
+        CheckConstraint("artifact_type IN ('cover_letter', 'email')", name="ck_approval_artifact_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    item_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    draft_version_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    decided_by: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class OutboxMessage(Base):
+    __tablename__ = "outbox_messages"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_outbox_dedupe_key"),
+        Index("ix_outbox_pending", "published_at", "available_at", "claimed_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    topic: Mapped[str] = mapped_column(String(120), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    processing_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class DeliveryRecord(Base):
+    __tablename__ = "delivery_records"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["item_id", "owner_id", "batch_id"],
+            ["batch_items.id", "batch_items.owner_id", "batch_items.batch_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["draft_version_id", "owner_id", "item_id", "artifact_type"],
+            [
+                "draft_versions.id",
+                "draft_versions.owner_id",
+                "draft_versions.item_id",
+                "draft_versions.artifact_type",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["owner_id", "item_id", "artifact_type", "draft_version_id", "approval_decision"],
+            [
+                "approval_decisions.owner_id",
+                "approval_decisions.item_id",
+                "approval_decisions.artifact_type",
+                "approval_decisions.draft_version_id",
+                "approval_decisions.decision",
+            ],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_delivery_idempotency_key"),
+        CheckConstraint("approval_decision = 'approved'", name="ck_delivery_requires_approval"),
+        CheckConstraint("artifact_type = 'email'", name="ck_delivery_email_artifact"),
+        CheckConstraint(
+            "status IN ('queued', 'sending', 'sent', 'failed', 'unknown', 'cancelled')",
+            name="ck_delivery_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    item_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(24), default="email", nullable=False)
+    draft_version_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    approval_decision: Mapped[str] = mapped_column(String(16), default="approved", nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="queued", nullable=False, index=True)
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(300))
+    safe_error_code: Mapped[Optional[str]] = mapped_column(String(80))
+    queued_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
 _engine_lock = threading.Lock()
 _engines: dict[str, Any] = {}
 
@@ -206,8 +522,9 @@ def _engine_for(database_url: str):
     if database_url.startswith("sqlite:"):
         options["connect_args"] = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(database_url, **options)
-    with engine.begin() as connection:
-        Base.metadata.create_all(connection)
+    if database_url.startswith("sqlite:"):
+        with engine.begin() as connection:
+            Base.metadata.create_all(connection)
     _engines[database_url] = engine
     return engine
 

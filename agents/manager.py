@@ -13,6 +13,10 @@ from agents.researcher import run_researcher
 from agents.cover_writer import run_coverwriter
 from agents.email_writer import run_emailwriter
 from agents.email_drafter import run_emaildrafter
+from agents.researcher import build_researcher_graph
+from agents.cover_writer import build_coverwriter_graph
+from agents.email_writer import build_emailwriter_graph
+from agents.email_drafter import build_emaildrafter_graph
 
 
 def Manager(state: OutreachState) -> Dict[str, Any]:
@@ -48,17 +52,34 @@ def manager_router(state: OutreachState) -> str:
     return END
 
 
-def build_manager_graph(checkpointer=None):
+def build_manager_graph(checkpointer=None, subgraph_checkpointer=None):
     """
     Construct and compile the Master Supervisor Outreach Graph.
     """
     builder = StateGraph(OutreachState)
+    active_subgraph_checkpointer = subgraph_checkpointer or checkpointer
+    if active_subgraph_checkpointer is None:
+        nodes = {
+            "Researcher": run_researcher,
+            "Coverwriter": run_coverwriter,
+            "Emailwriter": run_emailwriter,
+            "Emaildrafter": run_emaildrafter,
+        }
+    else:
+        research_graph = build_researcher_graph(checkpointer=active_subgraph_checkpointer)
+        cover_graph = build_coverwriter_graph(checkpointer=active_subgraph_checkpointer)
+        email_graph = build_emailwriter_graph(checkpointer=active_subgraph_checkpointer)
+        drafter_graph = build_emaildrafter_graph(checkpointer=active_subgraph_checkpointer)
+        nodes = {
+            "Researcher": lambda state, config: run_researcher(state, config, graph=research_graph),
+            "Coverwriter": lambda state, config: run_coverwriter(state, config, graph=cover_graph),
+            "Emailwriter": lambda state, config: run_emailwriter(state, config, graph=email_graph),
+            "Emaildrafter": lambda state, config: run_emaildrafter(state, config, graph=drafter_graph),
+        }
 
     builder.add_node("Manager", Manager)
-    builder.add_node("Researcher", run_researcher)
-    builder.add_node("Coverwriter", run_coverwriter)
-    builder.add_node("Emailwriter", run_emailwriter)
-    builder.add_node("Emaildrafter", run_emaildrafter)
+    for name, node in nodes.items():
+        builder.add_node(name, node)
 
     builder.add_edge(START, "Manager")
     builder.add_conditional_edges(

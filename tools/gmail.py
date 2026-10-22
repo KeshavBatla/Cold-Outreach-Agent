@@ -33,6 +33,7 @@ def get_gmail_service(token_path: Optional[str] = None):
     Authenticate and build the Google Gmail API service using OAuth2 credentials.
     Reads token.json or initiates local server flow via credentials.json.
     Accepts an optional token_path, defaulting to config.TOKEN_FILE.
+    Handles token refresh failures by initiating a fresh OAuth flow when appropriate.
     """
     if Credentials is None or build is None:
         raise ImportError(
@@ -47,22 +48,39 @@ def get_gmail_service(token_path: Optional[str] = None):
     if resolved_token_path.exists():
         creds = Credentials.from_authorized_user_file(str(resolved_token_path), config.GMAIL_SCOPES)
 
+    # If there are no valid credentials, initiate the OAuth flow
     if not creds or not creds.valid:
+        # If credentials exist but are expired and we have a refresh token, try to refresh
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        elif creds_path.exists():
-            if InstalledAppFlow is None:
-                raise ImportError("google_auth_oauthlib is required for OAuth login flow.")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(creds_path), config.GMAIL_SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-        else:
-            raise FileNotFoundError(
-                f"Gmail credentials not found at {creds_path}. "
-                "Download your OAuth client ID credentials.json from Google Cloud Console."
-            )
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                # Check if this is an invalid_grant error (refresh token is invalid/expired/revoked)
+                # We check the error message since the specific exception type might vary
+                if "invalid_grant" in str(e).lower() or "invalid_request" in str(e).lower():
+                    # Refresh token is invalid, so we need to initiate a fresh OAuth flow
+                    # Fall through to the OAuth flow initiation below
+                    pass
+                else:
+                    # For other refresh errors (network issues, etc.), re-raise to preserve diagnostic info
+                    raise
 
+        # If we still don't have valid credentials, initiate OAuth flow
+        if not creds or not creds.valid:
+            if creds_path.exists():
+                if InstalledAppFlow is None:
+                    raise ImportError("google_auth_oauthlib is required for OAuth login flow.")
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(creds_path), config.GMAIL_SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+            else:
+                raise FileNotFoundError(
+                    f"Gmail credentials not found at {creds_path}. "
+                    "Download your OAuth client ID credentials.json from Google Cloud Console."
+                )
+
+        # Save the credentials for the next run
         with open(resolved_token_path, "w", encoding="utf-8") as token_file:
             token_file.write(creds.to_json())
 

@@ -329,10 +329,30 @@ These scenarios are **deterministic fixtures** meant to test specific code paths
 - Actual Gmail OAuth flow or delivery
 - Real-world contact accuracy from Hunter.io
 
-### Schema Initialization & Persistence
+### Schema Migrations & Persistence
 
 - **SQLite is the local default**: Configured via `DATABASE_URL` environment variable (defaults to `sqlite:///runs/outreach.sqlite3`)
 - **PostgreSQL is supported**: Through SQLAlchemy and psycopg 3 when `DATABASE_URL` is set to a PostgreSQL connection string
+- **Local PostgreSQL URL**: Store `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/cold_outreach` in your ignored `.env`, replacing the placeholders locally. Do not commit credentials. SQLite remains the runtime default unless you explicitly configure a different URL.
+- **Apply migrations**: After installing requirements, create an empty database and run the Alembic baseline. These commands are instructions only; they were not run against your PostgreSQL installation:
+
+  ```powershell
+  Copy-Item .env.example .env
+  # Edit .env locally; do not paste or commit a real password.
+  psql -U postgres -c "CREATE DATABASE cold_outreach;"
+  python -m alembic upgrade head
+  ```
+
+  Alembic creates schema objects only and does not import SQLite data.
+- **Back up before a future SQLite import**: Stop the application first, then make and verify a backup with the SQLite CLI:
+
+  ```powershell
+  sqlite3 runs/outreach.sqlite3 ".backup 'runs/outreach-backup.sqlite3'"
+  sqlite3 runs/outreach-backup.sqlite3 "PRAGMA integrity_check;"
+  sqlite3 runs/outreach-backup.sqlite3 ".tables"
+  ```
+
+  `integrity_check` should return `ok`. Verify expected table row counts and retain both the original and verified backup until a separately reviewed import has been validated. Do not treat `alembic upgrade` as a data migration.
 - **Persisted data includes**:
   - Research history (to enable caching and prevent redundant API calls)
   - Contact cache (to reduce Hunter.io API calls)
@@ -343,10 +363,51 @@ These scenarios are **deterministic fixtures** meant to test specific code paths
   - Prevents re-contacting the same company within `DUPLICATE_COOLDOWN_DAYS` (default: 30 days)
   - Prevents re-contacting the same role at a company within the cooldown period
   - Respects user rejections via the exclusion list
-- **Schema initialization**: Currently uses `Base.metadata.create_all()` on application startup
-- **No Alembic migration history**: Schema migrations and production deployment safeguards remain future work
+- **Runtime schema initialization**: The legacy SQLite workflow retains its local schema initialization. PostgreSQL web application schema is migration-managed; the API does not create missing tables.
+- **Migration scope**: The original baseline captures the existing persistence models. A separate additive migration contains the web application tables.
 
 **Do not describe this database setup as production-ready**. It is suitable for local development and testing but lacks production safeguards like connection pooling, migration history, and robust error handling.
+
+### Batch Web Application (Milestones 2 and 3)
+
+The FastAPI application and React dashboard are an initial local foundation. The existing CLI and Streamlit workflow remain separate. The web path stores batches, items, run status/events, immutable draft versions, exact-version review decisions, artifact references, and enqueue requests in the application database. Cover letters are generated before email drafts because the email writer uses the cover letter. The web worker does not call the legacy delivery graph.
+
+Before starting the web app, install the Python requirements and configure `APP_DATABASE_URL` in the ignored `.env`. In local development/test with SQLite, the web app automatically applies migrations at startup. For PostgreSQL, apply migrations explicitly to a database you intentionally created:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env locally; use APP_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/cold_outreach
+psql -U postgres -c "CREATE DATABASE cold_outreach;"
+python -m alembic upgrade head
+```
+
+The commands above are examples only. No PostgreSQL server or database is initialized automatically. For the durable worker, also configure a Redis instance and a private 16-, 24-, or 32-byte `LANGGRAPH_AES_KEY` for encrypted LangGraph checkpoints. Keep the key outside source control. Start the API with `uvicorn api:app --reload`; start Redis and a Celery worker/beat process separately with `celery -A webapp.queue.celery_app worker --beat`. Windows users may need WSL for Celery worker support. The worker requires PostgreSQL; SQLite is supported only for isolated local testing.
+
+The dashboard is in `frontend/`. Run `npm.cmd install` and `npm.cmd run dev` from that directory. Its Vite development proxy forwards `/api` and `/health` to `http://127.0.0.1:8000`. The frontend does not provide production sign-in. Protected routes fail closed unless a trusted authentication middleware supplies a principal. For local SQLite development/testing only, the fixed `X-Webapp-Test-Auth: enabled` identity is accepted when `APP_ENV=development` or `APP_ENV=test` and `WEBAPP_TEST_AUTH=true`. It cannot authenticate a production or PostgreSQL-backed app. Set `VITE_ENABLE_TEST_AUTH=true` in `frontend/.env.local` for local UI testing; never enable it in a deployed frontend.
+
+The web application does not implement Google OIDC, Gmail web OAuth, or delivery endpoints. Draft approval is not send authorization. Upload references are owner-scoped, but the current local private artifact store is filesystem-based and is not a production encrypted object-storage solution; production requires private encrypted object storage, malware scanning, and retention controls. Live provider execution and PostgreSQL/Redis worker recovery require separately configured integration testing; no external provider, OAuth flow, or email send is part of the local mock/test path. Worker execution is at-most-once after a job is claimed: failures are persisted and need an explicit owner-authorized retry. A worker process that is killed after claiming a task can leave it in a running/uncertain state and will not be blindly replayed; operator recovery procedures and PostgreSQL restart testing remain required before production use.
+
+For a local dashboard/API smoke test without PostgreSQL, use a disposable SQLite file. This verifies protected API/UI requests and batch persistence only; **no worker runs on SQLite**, so batches remain queued and no research or draft generation occurs:
+
+```powershell
+# From the repository root in the API terminal:
+New-Item -ItemType Directory -Force runs
+$env:APP_ENV = "development"
+$env:WEBAPP_TEST_AUTH = "true"
+$env:APP_DATABASE_URL = "sqlite:///runs/web-review.sqlite3"
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, enable only the local UI test header and start Vite:
+
+```powershell
+Push-Location frontend
+npm.cmd install
+npm.cmd run dev
+Pop-Location
+```
+
+Open the Vite URL printed in the terminal. The local test identity and SQLite file are not suitable for deployment. A full durable worker run requires intentionally configured PostgreSQL, Redis, encrypted checkpoints, and a real trusted authentication integration, which is not implemented in this milestone.
 
 ### Delivery Safety & Outcomes
 

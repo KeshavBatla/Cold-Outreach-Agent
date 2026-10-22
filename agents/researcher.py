@@ -294,7 +294,7 @@ def trynextcandidate(state: ResearcherState) -> Dict[str, Any]:
         }
 
     pick = candidates[idx]
-    print(f"[trynextcandidate] Trying candidate {idx + 1}/{len(candidates)}: {pick}")
+    print(f"[trynextcandidate] Trying candidate {idx + 1}/{len(candidates)}")
     return {
         "contact_name": pick["name"],
         "contact_email": pick["email"],
@@ -342,11 +342,6 @@ def llm_evaluates(state: ResearcherState) -> Dict[str, Any]:
         run_id=state.get("research_run_id") or "unknown",
     )
     evaluation: ResearchEvaluation = result["responses"][0]
-    print(
-        f"[llm_evaluates] ROLE FIT — job_role={state.get('job_role')!r}, "
-        f"is_sufficient={evaluation.is_sufficient}, feedback={evaluation.feedback}"
-    )
-
     updates = {
         "evaluator_feedback": evaluation.feedback,
         "research_sufficient": evaluation.is_sufficient,
@@ -586,11 +581,13 @@ def run_researcher(
     state: OutreachState,
     config: Optional[RunnableConfig] = None,
     decision_callback: Optional[Callable[[Dict[str, Any]], str]] = None,
+    graph=None,
 ) -> Dict[str, Any]:
     """
     Execute the Researcher subgraph and handle human-in-the-loop interrupts.
     """
     cfg = config or {}
+    active_graph = graph or researcher_graph
     parent_thread_id = (
         (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None)
         or (Path(state.get("run_dir")).name if state.get("run_dir") else "run")
@@ -615,14 +612,14 @@ def run_researcher(
         "research_cache_hit": False,
     }
 
-    checkpoint = researcher_graph.get_state(clean_config)
+    checkpoint = active_graph.get_state(clean_config)
     if checkpoint.next:
         result = checkpoint.values
     else:
-        result = researcher_graph.invoke(sub_input, clean_config)
+        result = active_graph.invoke(sub_input, clean_config)
 
-    while researcher_graph.get_state(clean_config).next:
-        current_values = researcher_graph.get_state(clean_config).values
+    while active_graph.get_state(clean_config).next:
+        current_values = active_graph.get_state(clean_config).values
         print("\n--- RESEARCH SUMMARY FOR REVIEW ---")
         print(f"Company: {current_values.get('company_name')}")
         print(f"Contact: {current_values.get('contact_name')} <{current_values.get('contact_email')}>")
@@ -640,8 +637,8 @@ def run_researcher(
             break
         if decision not in {"approve", "reject"}:
             raise ValueError("Research decision must be approve, reject, or pending.")
-        researcher_graph.update_state(clean_config, {"human_decision": decision})
-        result = researcher_graph.invoke(None, clean_config)
+        active_graph.update_state(clean_config, {"human_decision": decision})
+        result = active_graph.invoke(None, clean_config)
 
     decision = str(result.get("human_decision") or "").strip().lower()
     outcome = (

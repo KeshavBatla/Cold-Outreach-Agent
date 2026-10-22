@@ -25,7 +25,6 @@ from utils.observability import invoke_with_usage
 def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
     company = state.get("company_name", "")
     role = state.get("job_role", "")
-    print(f"[coverletterwrite] Attempting generation — retry_count={state.get('retry_count', 0)}, company={company!r}, role={role!r}")
 
     if not company or not role:
         return {
@@ -91,7 +90,6 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
 def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
     cover_letter = extract_text(state.get("cover_letter", ""))
     current_retry = state.get("retry_count", 0)
-    print(f"[llm_evaluator_cover] Evaluating draft — retry_count={current_retry}, letter_present={bool(cover_letter)}")
 
     if not cover_letter:
         return {
@@ -122,7 +120,6 @@ def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
         run_id=state.get("research_run_id") or "unknown",
     )
     evaluation: CoverLetterEvaluation = result["responses"][0]
-    print(f"[llm_evaluator_cover] is_sufficient={evaluation.is_sufficient}, feedback={evaluation.feedback[:100]}")
 
     updates = {
         "evaluator_feedback": evaluation.feedback,
@@ -136,7 +133,6 @@ def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:
 def llm_router_cover(state: CoverwriterState) -> str:
     retry_count = state.get("retry_count", 0)
     max_retries = state.get("max_retries") or app_config.MAX_RETRIES
-    print(f"[llm_router_cover] retry_count={retry_count}, max_retries={max_retries}, letter_sufficient={state.get('letter_sufficient')}")
 
     if state.get("letter_sufficient") is True:
         return END
@@ -145,12 +141,27 @@ def llm_router_cover(state: CoverwriterState) -> str:
     return "coverletterwrite"
 
 
-def build_coverwriter_graph(checkpointer=None):
+def build_coverwriter_graph(checkpointer=None, private_artifact_loader=None):
     """
     Build and compile the Coverwriter Subgraph.
     """
     builder = StateGraph(CoverwriterState)
-    builder.add_node("coverletterwrite", coverletterwrite)
+    if private_artifact_loader is None:
+        coverletter_node = coverletterwrite
+    else:
+        def coverletter_node(state):
+            prepared_state = dict(state)
+            if not prepared_state.get("raw_cv_text") and prepared_state.get("cv_artifact_id"):
+                prepared_state["raw_cv_text"] = private_artifact_loader(
+                    prepared_state["cv_artifact_id"]
+                )
+            if not prepared_state.get("example_cover_letter") and prepared_state.get("example_letter_artifact_id"):
+                prepared_state["example_cover_letter"] = private_artifact_loader(
+                    prepared_state["example_letter_artifact_id"]
+                )
+            return coverletterwrite(prepared_state)
+
+    builder.add_node("coverletterwrite", coverletter_node)
     builder.add_node("llm_evaluator", llm_evaluator_cover)
     builder.add_edge(START, "coverletterwrite")
     builder.add_edge("coverletterwrite", "llm_evaluator")
@@ -166,7 +177,11 @@ coverwriter_graph = build_coverwriter_graph()
 from langchain_core.runnables import RunnableConfig
 
 
-def run_coverwriter(state: OutreachState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+def run_coverwriter(
+    state: OutreachState,
+    config: Optional[RunnableConfig] = None,
+    graph=None,
+) -> Dict[str, Any]:
     """
     Execute the Coverwriter subgraph.
     """
@@ -185,16 +200,13 @@ def run_coverwriter(state: OutreachState, config: Optional[RunnableConfig] = Non
         "research_summary": state.get("research_summary"),
         "research_run_id": (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None) or "run",
         "raw_cv_text": state.get("raw_cv_text"),
+        "cv_artifact_id": state.get("cv_artifact_id"),
+        "example_letter_artifact_id": state.get("example_letter_artifact_id"),
         "example_cover_letter": state.get("example_cover_letter"),
         "retry_count": 0,
         "max_retries": state.get("max_retries", app_config.MAX_RETRIES),
     }
-    result = coverwriter_graph.invoke(sub_input, clean_config)
-    print("\n--- COVER LETTER DRAFT ---")
-    print(result.get("cover_letter"))
-    print("--- EVALUATOR FEEDBACK ---")
-    print(result.get("evaluator_feedback"))
-
+    result = (graph or coverwriter_graph).invoke(sub_input, clean_config)
     return {
         "cover_letter": result.get("cover_letter"),
         "cover_letter_approved": bool(result.get("letter_sufficient")),

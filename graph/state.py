@@ -32,6 +32,8 @@ class OutreachState(MessagesState):
     # Generalized candidate inputs
     raw_cv_text: Optional[str]          # Extracted text from uploaded CV
     example_cover_letter: Optional[str] # Uploaded example cover letter text
+    cv_artifact_id: Optional[str]
+    example_letter_artifact_id: Optional[str]
     target_seniority: Optional[str]     # e.g., "fresher/intern", "experienced"
     target_domain_keywords: Optional[str] # e.g., "agentic AI, LLM applications"
     location_preference: Optional[str]  # e.g., "remote", "India-based"
@@ -105,6 +107,8 @@ class CoverwriterState(MessagesState):
     research_run_id: Optional[str]
     raw_cv_text: Optional[str]
     example_cover_letter: Optional[str]
+    cv_artifact_id: Optional[str]
+    example_letter_artifact_id: Optional[str]
     cover_letter: Optional[str]
     evaluator_feedback: Optional[str]
     letter_sufficient: Optional[bool]

@@ -282,11 +282,13 @@ def run_emaildrafter(
     state: OutreachState,
     config: Optional[RunnableConfig] = None,
     decision_callback: Optional[Callable[[Dict[str, Any]], str]] = None,
+    graph=None,
 ) -> Dict[str, Any]:
     """
     Execute the Emaildrafter subgraph and handle human approval.
     """
     cfg = config or {}
+    active_graph = graph or emaildrafter_graph
     parent_thread_id = (
         (cfg.get("configurable", {}).get("thread_id") if isinstance(cfg, dict) else None)
         or (Path(state.get("run_dir")).name if state.get("run_dir") else "run")
@@ -309,14 +311,14 @@ def run_emaildrafter(
         "owner_id": state.get("owner_id") or app_config.LOCAL_OWNER_ID,
         "delivery_status": state.get("delivery_status"),
     }
-    checkpoint = emaildrafter_graph.get_state(clean_config)
+    checkpoint = active_graph.get_state(clean_config)
     if checkpoint.next:
         result = checkpoint.values
     else:
-        result = emaildrafter_graph.invoke(sub_input, clean_config)
+        result = active_graph.invoke(sub_input, clean_config)
 
-    while emaildrafter_graph.get_state(clean_config).next:
-        current_values = emaildrafter_graph.get_state(clean_config).values
+    while active_graph.get_state(clean_config).next:
+        current_values = active_graph.get_state(clean_config).values
         print("\n--- READY TO SEND ---")
         print("To:", current_values.get("contact_email"))
         print("Subject:", current_values.get("subject"))
@@ -350,8 +352,8 @@ def run_emaildrafter(
             "owner_id": sub_input["owner_id"],
             "delivery_status": "approved" if decision == "approve" else "rejected",
         }
-        emaildrafter_graph.update_state(clean_config, updates)
-        result = emaildrafter_graph.invoke(None, clean_config)
+        active_graph.update_state(clean_config, updates)
+        result = active_graph.invoke(None, clean_config)
 
     return {
         "subject": result.get("subject"),
