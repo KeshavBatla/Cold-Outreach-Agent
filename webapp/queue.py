@@ -7,7 +7,7 @@ from celery import Celery
 from webapp.settings import Settings
 
 settings = Settings.from_environment()
-celery_app = Celery("cold_outreach", broker=settings.redis_url)
+celery_app = Celery("cold_outreach", broker=settings.redis_url, include=("webapp.worker",))
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],

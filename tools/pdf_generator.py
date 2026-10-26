@@ -9,9 +9,14 @@ from fpdf import FPDF
 import config
 
 
-def text_to_pdf(text: str, output_path: str, title: Optional[str] = None) -> str:
+def render_cover_letter_pdf(
+    text: str,
+    title: Optional[str] = None,
+    output_path: Optional[str] = None,
+) -> bytes:
     """
     Render cover letter text into a clean, professional A4 PDF.
+    Returns PDF bytes. If output_path is provided, also writes the file to disk.
     Uses DejaVu Sans TTF fonts if present, with graceful fallback to standard Helvetica.
     """
     pdf = FPDF(orientation="P", unit="mm", format="A4")
@@ -54,8 +59,21 @@ def text_to_pdf(text: str, output_path: str, title: Optional[str] = None) -> str
             pdf.multi_cell(w=0, h=5.2, text=formatted_para, align="L")
             pdf.ln(3.5)
 
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    pdf.output(str(output_file))
-    return str(output_file)
+    pdf_bytes = bytes(pdf.output())
+
+    if output_path:
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_bytes(pdf_bytes)
+
+    return pdf_bytes
+
+
+def text_to_pdf(text: str, output_path: str, title: Optional[str] = None) -> str:
+    """
+    Render cover letter text into a clean, professional A4 PDF.
+    Backward compatible wrapper around render_cover_letter_pdf.
+    """
+    render_cover_letter_pdf(text, title=title, output_path=output_path)
+    return str(output_path)
 

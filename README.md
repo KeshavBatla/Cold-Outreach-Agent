@@ -249,16 +249,16 @@ Copy `.env.example` to `.env`:
 Copy-Item .env.example .env
 ```
 
-On Linux/macOS use `cp .env.example .env`. Configure credentials for any live provider you plan to use. `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `TAVILY_API_KEY`, and `HUNTER_API_KEY` are needed for their respective live integrations. Gmail additionally requires a local OAuth `credentials.json` and authorizes locally when first used.
+On Linux/macOS use `cp .env.example .env`. Configure credentials for any live provider you plan to use. `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `TAVILY_API_KEY`, and `HUNTER_API_KEY` are needed for their respective live integrations. The legacy Streamlit app uses its local OAuth client file; the web dashboard uses the backend-only Google OAuth web-client variables below.
 
 Important settings:
 
 - `MODEL_NAME` selects the Gemini model. The default is `models/gemini-3.1-flash-lite`; verify access and quotas with your own Google account.
 - `MOCK_MODE=true` switches provider and generation paths to deterministic fixtures and does not require API keys.
-- `DRY_RUN=true` skips Gmail delivery, while allowing live research/generation if `MOCK_MODE=false`.
+- The web dashboard uses `GMAIL_TEST_MODE=true` by default; its explicit send action records `simulated` without contacting Gmail. `GMAIL_LIVE_SEND_ENABLED` defaults to false and is independent of the legacy Streamlit `DRY_RUN` setting.
 - `DATABASE_URL` defaults to an ignored local SQLite database under `runs/`. PostgreSQL can be configured with `postgresql://user:password@host:5432/database` using psycopg 3.
 - `OUTREACH_OWNER_ID` identifies the current local owner for exclusions; it is not an authentication mechanism.
-- Duplicate cooldown (`DUPLICATE_COOLDOWN_DAYS`), cache TTL (`RESEARCH_CACHE_TTL_DAYS`), verification freshness (`VERIFICATION_FRESHNESS_DAYS`), max contacts per company (`MAX_CONTACTS_PER_COMPANY`), max email verifications (`MAX_EMAIL_VERIFICATIONS`), and max external calls per run (`MAX_EXTERNAL_CALLS_PER_RUN`) can be configured using `.env.example`.
+- Duplicate cooldown (`DUPLICATE_COOLDOWN_DAYS`), cache TTL (`RESEARCH_CACHE_TTL_DAYS`), verification freshness (`VERIFICATION_FRESHNESS_DAYS`), max contacts per company (`MAX_CONTACTS_PER_COMPANY`), max email verifications (`MAX_EMAIL_VERIFICATIONS`), max external calls per run (`MAX_EXTERNAL_CALLS_PER_RUN`), and speculative search budget (`SPECULATIVE_SEARCH_BUDGET`, 1–10 opportunities; default 4) can be configured using `.env.example`.
 
 Do not put credentials, OAuth tokens, CVs, or generated PDFs under version control.
 
@@ -381,11 +381,29 @@ psql -U postgres -c "CREATE DATABASE cold_outreach;"
 python -m alembic upgrade head
 ```
 
-The commands above are examples only. No PostgreSQL server or database is initialized automatically. For the durable worker, also configure a Redis instance and a private 16-, 24-, or 32-byte `LANGGRAPH_AES_KEY` for encrypted LangGraph checkpoints. Keep the key outside source control. Start the API with `uvicorn api:app --reload`; start Redis and a Celery worker/beat process separately with `celery -A webapp.queue.celery_app worker --beat`. Windows users may need WSL for Celery worker support. The worker requires PostgreSQL; SQLite is supported only for isolated local testing.
+The commands above are examples only. No PostgreSQL server or database is initialized automatically. For the durable worker, also configure a Redis instance and a private 16-, 24-, or 32-byte `LANGGRAPH_AES_KEY` for encrypted LangGraph checkpoints. Keep the key outside source control. Start the API with `uvicorn api:app --reload`; start Redis, the Celery worker, and Celery Beat separately from the repository root. On Windows, run these in separate terminals:
+
+```powershell
+celery -A webapp.queue.celery_app worker --pool=solo --loglevel=INFO
+celery -A webapp.queue.celery_app beat --loglevel=INFO --schedule=runs/celerybeat-schedule
+```
+
+Create the `runs` directory before starting Beat if it does not exist. Celery imports `webapp.worker` at worker startup so both the scheduled outbox dispatcher and message processor are registered. The worker requires PostgreSQL; SQLite can persist API batches but cannot process research jobs. If the worker receives a queued job with SQLite configured, it records a visible `worker_requires_postgresql` failure for explicit retry after configuring the supported services.
 
 The dashboard is in `frontend/`. Run `npm.cmd install` and `npm.cmd run dev` from that directory. Its Vite development proxy forwards `/api` and `/health` to `http://127.0.0.1:8000`. The frontend does not provide production sign-in. Protected routes fail closed unless a trusted authentication middleware supplies a principal. For local SQLite development/testing only, the fixed `X-Webapp-Test-Auth: enabled` identity is accepted when `APP_ENV=development` or `APP_ENV=test` and `WEBAPP_TEST_AUTH=true`. It cannot authenticate a production or PostgreSQL-backed app. Set `VITE_ENABLE_TEST_AUTH=true` in `frontend/.env.local` for local UI testing; never enable it in a deployed frontend.
 
-The web application does not implement Google OIDC, Gmail web OAuth, or delivery endpoints. Draft approval is not send authorization. Upload references are owner-scoped, but the current local private artifact store is filesystem-based and is not a production encrypted object-storage solution; production requires private encrypted object storage, malware scanning, and retention controls. Live provider execution and PostgreSQL/Redis worker recovery require separately configured integration testing; no external provider, OAuth flow, or email send is part of the local mock/test path. Worker execution is at-most-once after a job is claimed: failures are persisted and need an explicit owner-authorized retry. A worker process that is killed after claiming a task can leave it in a running/uncertain state and will not be blindly replayed; operator recovery procedures and PostgreSQL restart testing remain required before production use.
+The web application now supports owner-scoped Gmail web OAuth and explicit one-email delivery. Draft approval alone never sends. Tokens are encrypted at rest with the stable `LANGGRAPH_AES_KEY`, and only the Gmail `gmail.send` scope is requested. Live delivery remains disabled unless `GMAIL_TEST_MODE=false` and `GMAIL_LIVE_SEND_ENABLED=true`; test mode persists a `simulated` delivery and never calls Gmail. The additive `c3a8271f6d42` migration adds that test-only delivery status and widens encrypted token storage; apply migrations explicitly to PostgreSQL before enabling the web delivery feature. A delivery reservation is unique per batch item, so repeated clicks do not resend. If a reservation remains queued or sending for five minutes, check Gmail Sent and use **Check Sent and mark unknown** only when delivery cannot be confirmed. Unknown outcomes are never retried automatically. This is a local application workflow, not a production email platform; deploy only after appropriate security, consent, retention, operational recovery, and provider quota review.
+
+#### Web dashboard Gmail setup
+
+1. In Google Cloud Console, enable the Gmail API, configure the OAuth consent screen, and create an OAuth client ID with application type **Web application**. Add the exact callback URI below to the client's authorized redirect URIs. Add the local account as a test user if Google's consent screen is in testing.
+2. In the ignored backend `.env`, configure `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8000/api/v1/gmail/oauth/callback`. The frontend origin must remain in `WEB_ALLOWED_ORIGINS`; the OAuth redirect is the backend callback.
+3. Keep the existing stable `LANGGRAPH_AES_KEY` set. The API refuses to begin OAuth without a supported encryption key. Do not copy credentials or tokens into the frontend; no client secret or token is sent to browser JavaScript.
+4. Apply `python -m alembic upgrade head` to the already-configured application database after verifying the target database. Do not run it against maintenance or unrelated databases.
+5. Keep `GMAIL_TEST_MODE=true` and `GMAIL_LIVE_SEND_ENABLED=false` while connecting and checking the dashboard. Test-mode confirmation records a simulation only. To enable actual transmission later, deliberately set `GMAIL_TEST_MODE=false` and `GMAIL_LIVE_SEND_ENABLED=true`, restart the API, and verify the dashboard says live delivery is enabled.
+6. For a safe one-email live check, select an eligible item whose contact address is a mailbox you control, review the saved subject/body and exact current approval, then use **Send Email** and confirm the displayed recipient, subject, and body. Send only one item. Confirm `sent` and its Gmail message ID in the dashboard; if the UI reports `unknown` or remains `sending`, check Gmail Sent and do not retry. Disconnecting explicitly revokes the Google token and removes its encrypted database value.
+
+When Google OAuth is not configured, the dashboard connection action returns the names of missing settings without exposing secret values. The OAuth consent screen and redirect URI must be configured by the operator; the application does not invent or create credentials.
 
 For a local dashboard/API smoke test without PostgreSQL, use a disposable SQLite file. This verifies protected API/UI requests and batch persistence only; **no worker runs on SQLite**, so batches remain queued and no research or draft generation occurs:
 

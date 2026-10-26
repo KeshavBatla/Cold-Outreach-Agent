@@ -22,6 +22,8 @@ EXPECTED_EXISTING_TABLES = {
 
 EXPECTED_WEB_TABLES = {
     "app_users",
+    "local_credentials",
+    "web_auth_sessions",
     "gmail_connections",
     "outreach_batches",
     "batch_items",
@@ -59,6 +61,15 @@ def test_fresh_sqlite_database_matches_existing_metadata(tmp_path):
         assert set(inspector.get_table_names()) == (
             EXPECTED_EXISTING_TABLES | EXPECTED_WEB_TABLES | {"alembic_version"}
         )
+        assert {
+            column["name"] for column in inspector.get_columns("batch_items")
+        } >= {
+            "mode",
+            "candidate_profile",
+            "target_seniority",
+            "target_domain_keywords",
+            "location_preference",
+        }
         assert inspector.get_foreign_keys("contacts")[0]["constrained_columns"] == ["company_id"]
         assert {
             tuple(constraint["column_names"])
@@ -78,6 +89,11 @@ def test_fresh_sqlite_database_matches_existing_metadata(tmp_path):
                 "owner_id", "item_id", "artifact_type", "draft_version_id", "approval_decision"
             ]
             for fk in delivery_fks
+        )
+        assert any(
+            "simulated" in constraint["sqltext"]
+            for constraint in inspector.get_check_constraints("delivery_records")
+            if constraint["name"] == "ck_delivery_status"
         )
         assert {
             index["name"] for index in inspector.get_indexes("outreach_events")

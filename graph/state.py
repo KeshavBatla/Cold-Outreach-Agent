@@ -87,6 +87,10 @@ class ResearcherState(MessagesState):
     research_cache_hit: bool
     retry_count: int
     max_retries: int
+    search_attempt: int
+    search_budget: int
+    retry_counted: bool
+    rejected_candidates: List[Dict[str, Any]]
     hunter_candidates: Optional[list]
     hunter_candidate_index: int
     company_domain: Optional[str]

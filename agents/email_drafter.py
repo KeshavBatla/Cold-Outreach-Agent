@@ -6,6 +6,7 @@ pauses for final human approval, and transmits the email via Gmail API.
 
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
+import re
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -28,12 +29,13 @@ def emaildrafter(state: EmaildrafterState) -> Dict[str, Any]:
     if not company or not role:
         return {"subject": None}
 
+    candidate_name = state.get("candidate_name") or "Applicant"
     if app_config.MOCK_MODE:
-        return {"subject": f"Interest in {role} at {company}"}
+        if candidate_name and candidate_name != "Applicant":
+            return {"subject": f"{role} Application — {candidate_name}"}
+        return {"subject": f"{role} Application at {company}"}
     llm = app_config.get_llm()
     subject_generator = get_subject_generator(llm)
-
-    candidate_name = state.get("candidate_name") or "Applicant"
     result = invoke_with_usage(
         subject_generator.invoke,
         {
@@ -52,7 +54,8 @@ def emaildrafter(state: EmaildrafterState) -> Dict[str, Any]:
         run_id=state.get("research_run_id") or "unknown",
     )
     subject: EmailSubject = result["responses"][0]
-    return {"subject": subject.subject}
+    cleaned_subject = re.sub(r"\[(?:candidate[ _]?name|your[ _]?name)\]", candidate_name, subject.subject, flags=re.I)
+    return {"subject": cleaned_subject}
 
 
 def human_evaluation_draft(state: EmaildrafterState) -> Dict[str, Any]:

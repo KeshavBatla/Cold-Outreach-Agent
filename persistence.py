@@ -209,6 +209,33 @@ class AppUser(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
 
+class LocalCredential(Base):
+    __tablename__ = "local_credentials"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("app_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    login_name: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class WebAuthSession(Base):
+    __tablename__ = "web_auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("app_users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    csrf_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
 class GmailConnection(Base):
     __tablename__ = "gmail_connections"
 
@@ -217,7 +244,7 @@ class GmailConnection(Base):
     account_email: Mapped[Optional[str]] = mapped_column(String(320))
     status: Mapped[str] = mapped_column(String(24), default="unlinked", nullable=False)
     scopes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    token_secret_ref: Mapped[Optional[str]] = mapped_column(String(512))
+    token_secret_ref: Mapped[Optional[str]] = mapped_column(Text)
     linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     __table_args__ = (
@@ -232,6 +259,7 @@ class OutreachBatch(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
     label: Mapped[Optional[str]] = mapped_column(String(240))
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     __table_args__ = (
@@ -266,11 +294,16 @@ class BatchItem(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     batch_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("app_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    mode: Mapped[str] = mapped_column(String(24), default="open_role", nullable=False)
     target_company: Mapped[Optional[str]] = mapped_column(String(300))
     target_domain: Mapped[Optional[str]] = mapped_column(String(255))
     target_role: Mapped[Optional[str]] = mapped_column(String(300))
     target_description: Mapped[Optional[str]] = mapped_column(Text)
     candidate_name: Mapped[Optional[str]] = mapped_column(String(200))
+    candidate_profile: Mapped[Optional[str]] = mapped_column(Text)
+    target_seniority: Mapped[Optional[str]] = mapped_column(String(200))
+    target_domain_keywords: Mapped[Optional[str]] = mapped_column(String(500))
+    location_preference: Mapped[Optional[str]] = mapped_column(String(300))
     cv_artifact_id: Mapped[Optional[str]] = mapped_column(ForeignKey("private_artifacts.id", ondelete="SET NULL"))
     example_letter_artifact_id: Mapped[Optional[str]] = mapped_column(ForeignKey("private_artifacts.id", ondelete="SET NULL"))
     company_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"))
@@ -489,7 +522,7 @@ class DeliveryRecord(Base):
         CheckConstraint("approval_decision = 'approved'", name="ck_delivery_requires_approval"),
         CheckConstraint("artifact_type = 'email'", name="ck_delivery_email_artifact"),
         CheckConstraint(
-            "status IN ('queued', 'sending', 'sent', 'failed', 'unknown', 'cancelled')",
+            "status IN ('queued', 'sending', 'sent', 'failed', 'unknown', 'cancelled', 'simulated')",
             name="ck_delivery_status",
         ),
     )
@@ -525,6 +558,11 @@ def _engine_for(database_url: str):
     if database_url.startswith("sqlite:"):
         with engine.begin() as connection:
             Base.metadata.create_all(connection)
+            try:
+                from sqlalchemy import text
+                connection.execute(text("ALTER TABLE outreach_batches ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0"))
+            except Exception:
+                pass
     _engines[database_url] = engine
     return engine
 
@@ -810,6 +848,35 @@ def research_cache_key(
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def get_exclusions(owner_id: str) -> list[dict[str, Any]]:
+    if not owner_id:
+        return []
+    with Session(get_engine()) as session:
+        exclusions = session.scalars(
+            select(Exclusion).where(Exclusion.owner_id == owner_id)
+        ).all()
+        results = []
+        for exc in exclusions:
+            raw_key = exc.normalized_key or ""
+            if raw_key.startswith("domain:"):
+                domain = raw_key.removeprefix("domain:")
+                company_name = None
+            elif raw_key.startswith("name:"):
+                domain = None
+                company_name = raw_key.removeprefix("name:")
+            else:
+                domain = None
+                company_name = raw_key
+            results.append({
+                "normalized_key": raw_key,
+                "company_name": company_name,
+                "company_domain": domain,
+                "rejection_reason": exc.rejection_reason or "Previously excluded",
+                "created_at": exc.created_at,
+            })
+        return results
+
+
 def add_exclusion(owner_id: str, company_name: Optional[str], domain: Optional[str], reason: Optional[str] = None) -> None:
     normalized_name, canonical_domain, _ = _target_keys(company_name, domain)
     _, _, keys = _target_keys(company_name, domain)
@@ -823,6 +890,8 @@ def add_exclusion(owner_id: str, company_name: Optional[str], domain: Optional[s
             ))
             if existing is None:
                 session.add(Exclusion(owner_id=owner_id, normalized_key=key, rejection_reason=reason))
+            elif reason and not existing.rejection_reason:
+                existing.rejection_reason = reason
 
 
 def outreach_block_reason(
@@ -1031,6 +1100,8 @@ def record_provider_usage(
 
 
 def ensure_external_call_allowed(run_id: str) -> None:
+    if not run_id or run_id == "unknown":
+        return
     with Session(get_engine()) as session:
         rows = session.scalar(
             select(func.count(ProviderUsage.id)).where(

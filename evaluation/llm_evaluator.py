@@ -57,13 +57,32 @@ class CompanyNameOnly(BaseModel):
 
 
 class ResearchEvaluation(BaseModel):
+    company_relevant: bool = Field(
+        True,
+        description="True if the company operates in the target industry, domain, or AI/tech space.",
+    )
+    role_suitable: bool = Field(
+        True,
+        description="True if the specific role matches the technical domain and job requirements.",
+    )
+    seniority_match: bool = Field(
+        True,
+        description="True if the required seniority matches requested seniority, or if experience requirements are unspecified.",
+    )
+    experience_required: Optional[str] = Field(
+        None,
+        description="Experience or seniority level explicitly mentioned in the posting, or 'unspecified'.",
+    )
     is_sufficient: bool = Field(
         ...,
         description=(
-            "True only if the role is fresher/intern-level (not 3+ years experience, not senior/staff/lead) "
-            "AND genuinely focused on agentic AI, LLM applications, or multi-agent systems specifically — "
-            "not a generic backend role and not a plain RAG-only engineering role."
+            "True if the company is relevant, role is suitable, and seniority matches the requested profile. "
+            "False if there is a clear mismatch in domain, role, or seniority."
         ),
+    )
+    reason: Optional[str] = Field(
+        None,
+        description="Concise human-readable reason summarizing the decision.",
     )
     feedback: str = Field(
         ...,

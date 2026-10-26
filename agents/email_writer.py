@@ -18,7 +18,7 @@ from prompts.email_writer import (
     EMAIL_EVALUATION_TEMPLATE,
 )
 from evaluation.llm_evaluator import EmailEvaluation, get_email_evaluator
-from utils.helpers import extract_text
+from utils.helpers import extract_text, strip_placeholder_links, PLACEHOLDER_VALUES
 from utils.observability import invoke_with_usage
 
 
@@ -32,7 +32,14 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
             "email_sufficient": False,
         }
 
-    contact_name = state.get("contact_name") or "Hiring Team"
+    raw_contact = state.get("contact_name")
+    if raw_contact and raw_contact.strip().lower() not in PLACEHOLDER_VALUES and raw_contact.strip().lower() != "hiring team":
+        contact_name = raw_contact.strip()
+        greeting = f"Hello {contact_name},"
+    else:
+        contact_name = "Hiring Team"
+        greeting = f"Hi {company} Team,"
+
     research = state.get("research_summary") or ""
     cover_letter = state.get("cover_letter") or ""
     candidate_name = state.get("candidate_name") or "Applicant"
@@ -41,9 +48,9 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
     if app_config.MOCK_MODE:
         return {
             "email_body": (
-                f"Hello {contact_name}, I am reaching out about the {role} opportunity at {company}. "
-                "My attached resume and cover letter provide more context on my background. "
-                "Would you be available for a brief conversation?"
+                f"{greeting}\n\nI am reaching out regarding the {role} opportunity at {company}. "
+                "My attached resume and cover letter provide details on my background and relevant projects. "
+                f"Would you be open to a brief conversation?\n\nBest regards,\n{candidate_name}"
             )
         }
 
@@ -72,7 +79,9 @@ def emailcontent(state: EmailwriterState) -> Dict[str, Any]:
         model=app_config.MODEL_NAME,
         run_id=state.get("research_run_id") or "unknown",
     )
-    return {"email_body": extract_text(response.content)}
+    extracted = extract_text(response.content)
+    cleaned = strip_placeholder_links(extracted, candidate_name=candidate_name)
+    return {"email_body": cleaned}
 
 
 def llm_evaluator_email(state: EmailwriterState) -> Dict[str, Any]:

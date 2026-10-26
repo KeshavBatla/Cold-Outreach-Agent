@@ -56,6 +56,7 @@ MAX_EMAIL_VERIFICATIONS = int(os.getenv("MAX_EMAIL_VERIFICATIONS", "3"))
 MAX_EXTERNAL_CALLS_PER_RUN = int(os.getenv("MAX_EXTERNAL_CALLS_PER_RUN", "20"))
 MAX_STAGE_ATTEMPTS = 2
 MAX_RETRIES = 3
+SPECULATIVE_SEARCH_BUDGET = max(1, min(int(os.getenv("SPECULATIVE_SEARCH_BUDGET", "10")), 50))
 
 # Gmail API Scopes (Send-only for security)
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
@@ -79,3 +80,6 @@ def get_llm(model: str = None, temperature: float = 0.2) -> ChatGoogleGenerative
         google_api_key=api_key,
         temperature=temperature
     )
+
+# Maximum speculative research attempts before finishing gracefully
+MAX_RESEARCH_ATTEMPTS = max(1, min(int(os.getenv("MAX_RESEARCH_ATTEMPTS", "5")), 20))

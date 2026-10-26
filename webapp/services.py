@@ -21,6 +21,8 @@ from persistence import (
 )
 from webapp.auth import Principal
 from webapp.schemas import BatchCreateRequest
+from webapp.settings import Settings
+from utils.cv_parser import extract_text_from_cv, extract_candidate_name, generate_candidate_profile
 
 
 def _user(session: Session, principal: Principal) -> AppUser:
@@ -28,14 +30,14 @@ def _user(session: Session, principal: Principal) -> AppUser:
     if user is None:
         user = session.scalar(
             select(AppUser).where(
-                AppUser.identity_provider == "google",
+                AppUser.identity_provider == principal.identity_provider,
                 AppUser.external_subject == principal.subject,
             )
         )
         if user is None:
             user = AppUser(
                 id=principal.user_id,
-                identity_provider="google",
+                identity_provider=principal.identity_provider,
                 external_subject=principal.subject,
                 email=principal.email,
             )
@@ -43,7 +45,10 @@ def _user(session: Session, principal: Principal) -> AppUser:
             session.flush()
         elif user.id != principal.user_id:
             raise HTTPException(status_code=401, detail="Authentication identity is inconsistent.")
-    elif user.external_subject != principal.subject or user.identity_provider != "google":
+    elif (
+        user.external_subject != principal.subject
+        or user.identity_provider != principal.identity_provider
+    ):
         raise HTTPException(status_code=401, detail="Authentication identity is inconsistent.")
     return user
 
@@ -145,6 +150,37 @@ def create_batch(session: Session, principal: Principal, request: BatchCreateReq
         ):
             raise HTTPException(status_code=404, detail="Private artifact not found.")
 
+    resolved_candidate_name = (request.candidate_name or "").strip() or None
+    resolved_candidate_profile = (request.candidate_profile or "").strip() or None
+
+    if request.cv_artifact_id and (not resolved_candidate_name or not resolved_candidate_profile):
+        cv_artifact = session.scalar(
+            select(PrivateArtifact).where(
+                PrivateArtifact.id == request.cv_artifact_id,
+                PrivateArtifact.owner_id == user.id,
+            )
+        )
+        if cv_artifact:
+            settings = Settings.from_environment()
+            cv_path = (settings.private_artifact_dir / cv_artifact.storage_key).resolve()
+            if cv_path.is_file():
+                try:
+                    cv_text = extract_text_from_cv(cv_path, filename=cv_artifact.filename)
+                    if cv_text:
+                        if not resolved_candidate_name:
+                            extracted = extract_candidate_name(cv_text)
+                            if extracted and extracted != "Candidate":
+                                resolved_candidate_name = extracted
+                        if not resolved_candidate_profile:
+                            try:
+                                resolved_candidate_profile = generate_candidate_profile(cv_text)
+                            except Exception:
+                                resolved_candidate_profile = cv_text[:1200]
+                except Exception:
+                    pass
+    if not resolved_candidate_name:
+        resolved_candidate_name = "Candidate"
+
     now = utc_now()
     batch = OutreachBatch(
         id=str(uuid.uuid4()),
@@ -165,11 +201,16 @@ def create_batch(session: Session, principal: Principal, request: BatchCreateReq
             id=item_id,
             batch_id=batch.id,
             owner_id=user.id,
+            mode=request.mode,
             target_company=target.company_name,
             target_domain=target.domain,
             target_role=target.role,
             target_description=target.job_description,
-            candidate_name=request.candidate_name,
+            candidate_name=resolved_candidate_name,
+            candidate_profile=resolved_candidate_profile,
+            target_seniority=request.target_seniority,
+            target_domain_keywords=request.target_domain_keywords,
+            location_preference=request.location_preference,
             cv_artifact_id=request.cv_artifact_id,
             example_letter_artifact_id=request.example_letter_artifact_id,
             status="queued",
@@ -189,7 +230,9 @@ def create_batch(session: Session, principal: Principal, request: BatchCreateReq
             created_at=now,
             updated_at=now,
         )
-        session.add_all([item, run])
+        session.add(item)
+        session.flush()
+        session.add(run)
         session.add(
             OutboxMessage(
                 id=str(uuid.uuid4()),
@@ -234,13 +277,25 @@ def update_batch_status(session: Session, batch_id: str, owner_id: str) -> None:
     )
     if not items:
         status = "queued"
-    elif any(item.status in {"research_review", "draft_review"} for item in items):
-        status = "research_review" if any(item.status == "research_review" for item in items) else "draft_review"
-    elif any(item.status in {"queued", "researching", "drafting"} for item in items):
-        status = "researching" if any(item.status in {"queued", "researching"} for item in items) else "drafting"
+    elif any(item.status == "research_review" for item in items):
+        status = "research_review"
+    elif any(item.status == "draft_review" for item in items):
+        status = "draft_review"
+    elif any(
+        item.status == "researching"
+        or (item.status == "queued" and item.research_decision != "approved")
+        for item in items
+    ):
+        status = "researching"
+    elif any(
+        item.status == "drafting"
+        or (item.status == "queued" and item.research_decision == "approved")
+        for item in items
+    ):
+        status = "drafting"
     elif any(item.status == "failed" for item in items):
         status = "failed"
-    elif all(item.status in {"rejected", "ineligible"} for item in items):
+    elif all(item.status in {"rejected", "ineligible", "completed"} for item in items):
         status = "completed"
     else:
         status = "completed"

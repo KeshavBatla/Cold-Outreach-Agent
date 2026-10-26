@@ -12,6 +12,8 @@ from sqlalchemy.orm import sessionmaker
 
 from webapp.database import database_ready, get_session, initialize_local_schema, session_factory
 from webapp.auth import Principal
+from webapp.auth_routes import build_auth_router
+from webapp.gmail_routes import build_gmail_router
 from webapp.routes import build_api_router
 from webapp.schemas import HealthResponse
 from webapp.settings import Settings
@@ -35,7 +37,7 @@ def create_app(
     application = FastAPI(
         title="Cold Outreach API",
         version="1.0.0",
-        description="Owner-scoped batch and review API. Delivery endpoints are intentionally unavailable.",
+        description="Owner-scoped research, review, and explicit Gmail delivery API.",
         lifespan=lifespan,
     )
     application.state.settings = application_settings
@@ -50,12 +52,13 @@ def create_app(
     )
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=list(application_settings.allowed_origins),
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT"],
         allow_headers=[
             "Authorization",
             "Content-Type",
+            "X-CSRF-Token",
             "Last-Event-ID",
             "X-Webapp-Test-Auth",
         ],
@@ -101,6 +104,8 @@ def create_app(
             database="available" if ready else "unavailable",
         )
 
+    application.include_router(build_auth_router())
+    application.include_router(build_gmail_router())
     application.include_router(build_api_router())
     return application
 

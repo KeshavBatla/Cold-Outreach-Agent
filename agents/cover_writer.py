@@ -18,7 +18,7 @@ from prompts.cover_writer import (
     COVER_LETTER_EVALUATION_TEMPLATE,
 )
 from evaluation.llm_evaluator import CoverLetterEvaluation, get_coverletter_evaluator
-from utils.helpers import extract_text
+from utils.helpers import extract_text, strip_placeholder_links
 from utils.observability import invoke_with_usage
 
 
@@ -40,11 +40,12 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
     if not candidate_cv or not candidate_cv.strip():
         raise ValueError("raw_cv_text is empty. Cannot write a cover letter without a CV.")
     if app_config.MOCK_MODE:
+        candidate_name = state.get("candidate_name") or "Candidate"
         return {
             "cover_letter": (
                 f"Dear Hiring Team,\n\nI am interested in the {role} opportunity at {company}. "
                 "My attached resume provides further details about my background.\n\n"
-                "Thank you for your consideration."
+                f"Sincerely,\n{candidate_name}"
             )
         }
 
@@ -84,7 +85,9 @@ def coverletterwrite(state: CoverwriterState) -> Dict[str, Any]:
         model=app_config.MODEL_NAME,
         run_id=state.get("research_run_id") or "unknown",
     )
-    return {"cover_letter": extract_text(response.content)}
+    extracted = extract_text(response.content)
+    cleaned = strip_placeholder_links(extracted, candidate_name=state.get("candidate_name"))
+    return {"cover_letter": cleaned}
 
 
 def llm_evaluator_cover(state: CoverwriterState) -> Dict[str, Any]:

@@ -52,3 +52,48 @@ def register_contacted_company(company_name: str) -> None:
     raise RuntimeError(
         "Research is not a successful outreach event. Record delivery through the persistence repository."
     )
+
+
+def strip_placeholder_links(text: str, candidate_name: Optional[str] = None) -> str:
+    """
+    Remove placeholder links and labels (e.g. 'GitHub: [Link]', 'LinkedIn: [Link]')
+    while keeping real links intact. Replaces candidate name placeholders if candidate_name is known.
+    """
+    if not text:
+        return ""
+
+    # Remove lines that are purely empty placeholder references
+    cleaned = re.sub(
+        r"(?im)^[ \t]*(?:GitHub|LinkedIn|Portfolio|Website|Resume)\s*:\s*\[?(?:Link|URL|None|TBD)\]?[ \t]*\r?\n?",
+        "",
+        text,
+    )
+    # Remove inline empty placeholder tokens like ' [Link]' or ' (Link)'
+    cleaned = re.sub(r"(?i)\b(?:GitHub|LinkedIn|Portfolio|Website)\s*:\s*\[?(?:Link|URL)\]?", "", cleaned)
+
+    if candidate_name and candidate_name.strip():
+        cleaned = re.sub(
+            r"(?i)\[(?:Your Name|Candidate Name|Name)\]",
+            candidate_name.strip(),
+            cleaned,
+        )
+
+    return cleaned.strip()
+
+
+def find_unresolved_placeholders(text: str) -> list[str]:
+    """
+    Detect unresolved bracketed placeholder tokens in text, e.g. [Link], [URL], [Your Name], etc.
+    """
+    if not text:
+        return []
+    pattern = re.compile(
+        r"\[(?i:Link|URL|Your Name|Candidate Name|Company Name|Insert [^\]]+|Date|Phone|Email|Website|Portfolio)\]"
+    )
+    matches = pattern.findall(text)
+    # Also check for bracketed text containing '[your ...' or '[name]'
+    extra_pattern = re.compile(r"\[(?i:your\s+[^\]]+|name)\]")
+    for m in extra_pattern.findall(text):
+        if m not in matches:
+            matches.append(m)
+    return matches

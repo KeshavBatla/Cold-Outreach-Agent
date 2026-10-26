@@ -21,6 +21,7 @@ Rules:
     - Keep it concise and punchy (aim for 3 compact paragraphs, roughly 250 words) without losing technical depth.
     - Do not invent or hardcode office locations (like specific cities) unless explicitly mentioned in the job description or research.
     - Never fabricate experience not present in the CV.
+    - Do NOT include placeholder tokens, bracketed placeholders (such as [Link], [URL], [Your Name], [Company Name], [Portfolio], etc.), or empty labels like 'GitHub: [Link]'. If a link or detail is not present in the candidate CV, omit it completely.
 """
 
 COVER_LETTER_HUMAN_PROMPT = """Return only the cover letter itself. Do not include explanations, headings,

@@ -25,6 +25,7 @@ introduces and accompanies it. Rules:
 - End with a clear, low-friction call to action (e.g. open to a quick call).
 - Do not repeat the full cover letter content.
 - No subject line, no formal signature block beyond a simple sign-off with {candidate_name}.
+- Do NOT include placeholder tokens, bracketed placeholders (such as [Link], [URL], [Your Name], [Company Name], etc.), or empty labels. If a contact name is unknown, greet professionally (e.g. 'Hi {company} Team,') without inserting '[your name]' or missing-name tokens.
 """
 
 EMAIL_WRITER_HUMAN_PROMPT = (

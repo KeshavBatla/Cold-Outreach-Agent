@@ -10,9 +10,22 @@ from persistence import Base
 alembic_config = context.config
 
 if alembic_config.config_file_name is not None:
-    fileConfig(alembic_config.config_file_name)
+    fileConfig(alembic_config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
+
+_CHECKPOINTER_TABLES = {
+    "checkpoint_blobs",
+    "checkpoint_migrations",
+    "checkpoint_writes",
+    "checkpoints",
+}
+
+
+def include_object(object_, name, type_, reflected, compare_to):
+    if type_ == "table" and name in _CHECKPOINTER_TABLES:
+        return False
+    return True
 
 
 def get_database_url() -> str:
@@ -32,6 +45,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -52,6 +66,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
